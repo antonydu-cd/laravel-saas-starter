@@ -85,7 +85,20 @@ class InstallCommand extends Command
         }
         $this->newLine();
 
-        // 6. 发布 eBrook SaaS Starter 文件
+        // 6. 发布 ActivityLog 配置和迁移
+        $this->info('Publishing ActivityLog configurations...');
+        if (!$this->runArtisanCommand([
+            'vendor:publish',
+            '--provider=Spatie\Activitylog\ActivitylogServiceProvider',
+            '--tag=activitylog-migrations',
+            '--tag=activitylog-config',
+        ])) {
+            $this->error('Failed to publish ActivityLog configurations.');
+            return self::FAILURE;
+        }
+        $this->newLine();
+
+        // 7. 发布 eBrook SaaS Starter 文件
         $this->info('Publishing eBrook SaaS Starter files...');
         $force = $this->option('force');
 
