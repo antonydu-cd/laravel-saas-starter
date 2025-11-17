@@ -29,6 +29,10 @@ class UserResource extends Resource
     {
         return UsersTable::configure($table);
     }
+    public static function getNavigationGroup(): ?string
+    {
+        return __('System');
+    }
 
     public static function getRelations(): array
     {
