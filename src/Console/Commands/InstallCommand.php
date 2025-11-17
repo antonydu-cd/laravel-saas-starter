@@ -85,7 +85,20 @@ class InstallCommand extends Command
         }
         $this->newLine();
 
-        // 6. 发布 eBrook SaaS Starter 文件
+        // 6. 发布 ActivityLog 配置和迁移
+        $this->info('Publishing ActivityLog configurations...');
+        if (!$this->runArtisanCommand([
+            'vendor:publish',
+            '--provider=Spatie\Activitylog\ActivitylogServiceProvider',
+            '--tag=activitylog-migrations',
+            '--tag=activitylog-config',
+        ])) {
+            $this->error('Failed to publish ActivityLog configurations.');
+            return self::FAILURE;
+        }
+        $this->newLine();
+
+        // 7. 发布 eBrook SaaS Starter 文件
         $this->info('Publishing eBrook SaaS Starter files...');
         $force = $this->option('force');
 
@@ -282,6 +295,7 @@ class InstallCommand extends Command
         $providersToAdd = [
             'App\Providers\TenancyServiceProvider::class',
             'App\Providers\Filament\AppPanelProvider::class',
+            'App\Providers\ActivityLogServiceProvider::class',
         ];
 
         foreach ($providersToAdd as $provider) {
@@ -437,6 +451,7 @@ class InstallCommand extends Command
             'filament/filament:^4.2',
             'bezhansalleh/filament-shield:^4.0',
             'stancl/tenancy:dev-master',
+            'spatie/laravel-activitylog:^4.10',
         ];
 
         // 检查哪些包需要在项目 composer.json 中显式声明
