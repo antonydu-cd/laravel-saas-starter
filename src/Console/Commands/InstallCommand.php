@@ -1023,18 +1023,47 @@ return [
             return true;
         }
 
-        // 如果文件已存在，检查是否需要更新
+        // 如果文件已存在，确保配置正确
         $content = File::get($configPath);
+        $modified = false;
 
-        // 检查是否已经有custom_tabs配置
+        // 1. 确保所有不需要的标签页都被禁用
+        $replacements = [
+            "'show_application_tab' => true" => "'show_application_tab' => false",
+            "'show_logo_and_favicon' => true" => "'show_logo_and_favicon' => false",
+            "'show_analytics_tab' => true" => "'show_analytics_tab' => false",
+            "'show_seo_tab' => true" => "'show_seo_tab' => false",
+            "'show_email_tab' => true" => "'show_email_tab' => false",
+            "'show_social_networks_tab' => true" => "'show_social_networks_tab' => false",
+        ];
+
+        foreach ($replacements as $search => $replace) {
+            if (strpos($content, $search) !== false) {
+                $content = str_replace($search, $replace, $content);
+                $modified = true;
+            }
+        }
+
+        // 2. 确保show_custom_tabs为true
+        if (strpos($content, "'show_custom_tabs' => false") !== false) {
+            $content = str_replace("'show_custom_tabs' => false", "'show_custom_tabs' => true", $content);
+            $modified = true;
+        } elseif (strpos($content, "'show_custom_tabs'") === false) {
+            // 如果没有show_custom_tabs配置，添加它
+            $content = preg_replace(
+                '/(\'expiration_cache_config_time\' => \d+,)/',
+                '$1' . "\n    'show_custom_tabs' => true,",
+                $content
+            );
+            $modified = true;
+        }
+
+        // 3. 检查是否已经有custom_tabs配置
         if (strpos($content, "'custom_tabs' =>") === false) {
-            $this->info('Updating filament-general-settings.php to add custom tabs configuration...');
+            $this->info('Adding custom tabs configuration...');
 
-            // 在expiration_cache_config_time后面添加自定义配置
+            // 添加自定义配置
             $customConfig = "
-
-    // 启用自定义标签页
-    'show_custom_tabs' => true,
 
     // 自定义配置标签页 - API和支付设置
     'custom_tabs' => [
@@ -1082,17 +1111,30 @@ return [
         ],
     ],";
 
-            // 在expiration_cache_config_time后添加配置
-            $content = preg_replace(
-                '/(\'expiration_cache_config_time\' => \d+,)/',
-                '$1' . $customConfig,
-                $content
-            );
+            // 在show_custom_tabs后或expiration_cache_config_time后添加配置
+            if (strpos($content, "'show_custom_tabs' => true") !== false) {
+                $content = preg_replace(
+                    '/(\'show_custom_tabs\' => true,)/',
+                    '$1' . $customConfig,
+                    $content
+                );
+            } else {
+                $content = preg_replace(
+                    '/(\'expiration_cache_config_time\' => \d+,)/',
+                    '$1' . "\n    'show_custom_tabs' => true," . $customConfig,
+                    $content
+                );
+            }
 
+            $modified = true;
+            $this->info('Added custom tabs configuration');
+        }
+
+        if ($modified) {
             File::put($configPath, $content);
-            $this->info('Updated filament-general-settings.php with custom tabs configuration');
+            $this->info('Updated filament-general-settings.php configuration');
         } else {
-            $this->info('filament-general-settings.php already has custom tabs configuration');
+            $this->info('filament-general-settings.php configuration is already correct');
         }
 
         return true;
