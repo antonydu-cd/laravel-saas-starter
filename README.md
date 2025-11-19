@@ -52,11 +52,16 @@ php artisan ebrook-saas:install --force
 php artisan migrate
 php artisan shield:generate --all
 php artisan shield:super-admin
+```
+
+### 5. Run npm to build view
+
+```bash
 npm install
 npm run build
 ```
 
-### 5. Done!
+### 6. Done!
 
 ```bash
 php artisan serve
