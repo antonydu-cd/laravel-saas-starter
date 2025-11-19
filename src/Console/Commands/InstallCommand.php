@@ -722,6 +722,7 @@ class InstallCommand extends Command
         }
 
         // 执行 patch 命令（在项目根目录应用）
+        // 先尝试应用patch，如果失败则检查是否已经应用过
         $command = ['patch', '-p1', '-N', '-i', $patchFile];
         $process = new Process($command, base_path());
         $process->setTimeout(null);
@@ -731,7 +732,21 @@ class InstallCommand extends Command
         });
 
         if ($exitCode !== 0) {
+            // 检查是否patch已经被应用过
+            $checkCommand = ['patch', '-p1', '-R', '--dry-run', '-i', $patchFile];
+            $checkProcess = new Process($checkCommand, base_path());
+            $checkExitCode = $checkProcess->run();
+
+            if ($checkExitCode === 0) {
+                // patch已经被应用过
+                $this->info("Patch already applied, skipping...");
+                return true;
+            }
+
             $this->error("Failed to apply patch. Exit code: {$exitCode}");
+            $this->error("Patch command output:");
+            $this->line($process->getOutput());
+            $this->line($process->getErrorOutput());
             return false;
         }
 
