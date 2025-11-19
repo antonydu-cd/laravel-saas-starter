@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Stripe\Stripe;
 use Stripe\Checkout\Session;
 use Stripe\Webhook;
@@ -15,14 +16,28 @@ class StripeService
 
     public function __construct()
     {
-        $this->apiKey = (string) config('services.stripe.secret_key', '');
-        $this->webhookSecret = (string) config('services.stripe.webhook_secret', '');
+        // 只从数据库设置读取配置，完全不依赖env或config
+        $this->apiKey = (string) $this->getSetting('stripe_secret_key');
+        $this->webhookSecret = (string) $this->getSetting('stripe_webhook_secret');
 
         if (empty($this->apiKey)) {
-            throw new \RuntimeException('Stripe API key is not configured. Please set STRIPE_SECRET_KEY environment variable.');
+            throw new \RuntimeException('Stripe API key is not configured. Please configure STRIPE settings in General Settings.');
         }
 
         Stripe::setApiKey($this->apiKey);
+    }
+
+    /**
+     * 从数据库设置中获取配置值
+     */
+    private function getSetting(string $key, $default = null)
+    {
+        $settings = DB::table('general_settings')->first();
+        if ($settings && $settings->more_configs) {
+            $moreConfigs = json_decode($settings->more_configs, true);
+            return $moreConfigs[$key] ?? $default;
+        }
+        return $default;
     }
 
     /**

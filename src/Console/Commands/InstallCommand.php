@@ -144,6 +144,9 @@ class InstallCommand extends Command
         // 复制 Jobs 文件
         $this->publishJobs($force);
 
+        // 复制 Services 文件
+        $this->publishServices($force);
+
         // 复制 Pricing 页面视图
         $this->publishPricingView($force);
 
@@ -153,6 +156,9 @@ class InstallCommand extends Command
         // 更新 AdminPanelProvider 添加 FilamentGeneralSettingsPlugin
         $this->updateAdminPanelProvider();
 
+        // 配置 Filament General Settings
+        $this->configureFilamentGeneralSettings();
+
         // 更新认证配置
         $this->updateAuthConfig();
 
@@ -161,6 +167,11 @@ class InstallCommand extends Command
 
         // 更新 TenancyServiceProvider 添加 SeedTenantShield Job
         $this->updateTenancyServiceProvider();
+
+        // 清除配置缓存以确保新配置生效
+        $this->info('Clearing configuration cache...');
+        $this->runArtisanCommand(['config:clear']);
+        $this->runArtisanCommand(['config:cache']);
 
         $this->newLine();
         $this->info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -261,6 +272,19 @@ class InstallCommand extends Command
             base_path('app/Jobs'),
             $force,
             'Jobs'
+        );
+    }
+
+    /**
+     * 复制 Services 文件
+     */
+    protected function publishServices(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Services',
+            base_path('app/Services'),
+            $force,
+            'Services'
         );
     }
 
@@ -854,6 +878,160 @@ class InstallCommand extends Command
             $this->info('  TomatoPHP FilamentPaymentsPlugin disabled in AdminPanelProvider.php');
         } else {
             $this->info('  TomatoPHP plugin already disabled or not present');
+        }
+
+        return true;
+    }
+
+    /**
+     * 配置 Filament General Settings
+     */
+    protected function configureFilamentGeneralSettings(): bool
+    {
+        $configPath = config_path('filament-general-settings.php');
+
+        // 检查配置文件是否存在
+        if (!File::exists($configPath)) {
+            $this->warn('filament-general-settings.php config file not found, creating default configuration...');
+
+            // 创建默认配置文件
+            $defaultConfig = "<?php
+
+return [
+    'show_application_tab' => false,
+    'show_logo_and_favicon' => false,
+    'show_analytics_tab' => false,
+    'show_seo_tab' => false,
+    'show_email_tab' => false,
+    'show_social_networks_tab' => false,
+    'expiration_cache_config_time' => 60,
+
+    // 启用自定义标签页
+    'show_custom_tabs' => true,
+
+    // 自定义配置标签页 - API和支付设置
+    'custom_tabs' => [
+        'api_payment_settings' => [
+            'label' => 'API & Payment Settings',
+            'icon' => 'heroicon-o-key',
+            'columns' => 2,
+            'fields' => [
+                'lago_base_url' => [
+                    'type' => 'text',
+                    'label' => 'Lago Base URL',
+                    'placeholder' => 'https://api.lago.dev',
+                    'required' => false,
+                    'rules' => [],
+                ],
+                'lago_api_key' => [
+                    'type' => 'password',
+                    'label' => 'Lago API Key',
+                    'placeholder' => 'Enter your Lago API key',
+                    'required' => false,
+                    'rules' => [],
+                ],
+                'lago_timeout' => [
+                    'type' => 'text',
+                    'label' => 'Lago Timeout (seconds)',
+                    'placeholder' => '30',
+                    'required' => false,
+                    'rules' => [],
+                ],
+                'stripe_secret_key' => [
+                    'type' => 'password',
+                    'label' => 'Stripe Secret Key',
+                    'placeholder' => 'Place your Stripe Secret Key here',
+                    'required' => false,
+                    'rules' => [],
+                ],
+                'stripe_publishable_key' => [
+                    'type' => 'text',
+                    'label' => 'Stripe Publishable Key',
+                    'placeholder' => 'Place your Stripe Publishable Key here',
+                    'required' => false,
+                    'rules' => [],
+                ],
+            ],
+        ],
+    ],
+];
+";
+
+            File::put($configPath, $defaultConfig);
+            $this->info('Created filament-general-settings.php with API & Payment configuration');
+            return true;
+        }
+
+        // 如果文件已存在，检查是否需要更新
+        $content = File::get($configPath);
+
+        // 检查是否已经有custom_tabs配置
+        if (strpos($content, "'custom_tabs' =>") === false) {
+            $this->info('Updating filament-general-settings.php to add custom tabs configuration...');
+
+            // 在expiration_cache_config_time后面添加自定义配置
+            $customConfig = "
+
+    // 启用自定义标签页
+    'show_custom_tabs' => true,
+
+    // 自定义配置标签页 - API和支付设置
+    'custom_tabs' => [
+        'api_payment_settings' => [
+            'label' => 'API & Payment Settings',
+            'icon' => 'heroicon-o-key',
+            'columns' => 2,
+            'fields' => [
+                'lago_base_url' => [
+                    'type' => 'text',
+                    'label' => 'Lago Base URL',
+                    'placeholder' => 'https://api.lago.dev',
+                    'required' => false,
+                    'rules' => [],
+                ],
+                'lago_api_key' => [
+                    'type' => 'password',
+                    'label' => 'Lago API Key',
+                    'placeholder' => 'Enter your Lago API key',
+                    'required' => false,
+                    'rules' => [],
+                ],
+                'lago_timeout' => [
+                    'type' => 'text',
+                    'label' => 'Lago Timeout (seconds)',
+                    'placeholder' => '30',
+                    'required' => false,
+                    'rules' => [],
+                ],
+                'stripe_secret_key' => [
+                    'type' => 'password',
+                    'label' => 'Stripe Secret Key',
+                    'placeholder' => 'sk_test_...',
+                    'required' => false,
+                    'rules' => [],
+                ],
+                'stripe_publishable_key' => [
+                    'type' => 'text',
+                    'label' => 'Stripe Publishable Key',
+                    'placeholder' => 'pk_test_...',
+                    'required' => false,
+                    'rules' => [],
+                ],
+            ],
+        ],
+    ],";
+
+            // 在expiration_cache_config_time后添加配置
+            $content = preg_replace(
+                '/(\'expiration_cache_config_time\' => \d+,)/',
+                '$1' . $customConfig,
+                $content
+            );
+
+            File::put($configPath, $content);
+            $this->info('Updated filament-general-settings.php with custom tabs configuration');
+        } else {
+            $this->info('filament-general-settings.php already has custom tabs configuration');
         }
 
         return true;
