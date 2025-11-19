@@ -1,0 +1,22 @@
+diff --git a/vendor/tomatophp/filament-payments/src/Filament/Resources/PaymentResource.php b/vendor/tomatophp/filament-payments/src/Filament/Resources/PaymentResource.php
+index 1a29883..bb72174 100644
+--- a/vendor/tomatophp/filament-payments/src/Filament/Resources/PaymentResource.php
++++ b/vendor/tomatophp/filament-payments/src/Filament/Resources/PaymentResource.php
+@@ -6,7 +6,8 @@ use Illuminate\Support\Carbon;
+ use TomatoPHP\FilamentPayments\Filament\Resources\PaymentResource\Pages;
+ use TomatoPHP\FilamentPayments\Filament\Resources\PaymentResource\RelationManagers;
+ use TomatoPHP\FilamentPayments\Models\Payment;
+-use Filament\Schemas\Schema;
++use Filament\Actions\ViewAction;
++use Filament\Schemas\Schema;
+ use Filament\Resources\Resource;
+ use Filament\Tables;
+ use Filament\Tables\Columns\TextColumn;
+@@ -115,7 +116,7 @@ class PaymentResource extends Resource
+             ->actions([
+-                Tables\Actions\ViewAction::make(),
++                ViewAction::make(),
+             ])
+             ->bulkActions([
+                 // Tables\Actions\ViewAction::make(),
+             ])

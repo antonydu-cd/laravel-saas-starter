@@ -23,6 +23,7 @@ use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
 use Stancl\Tenancy\Middleware\PreventAccessFromUnwantedDomains;
 use Stancl\Tenancy\Middleware\ScopeSessions;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
+use App\Filament\App\Pages\Pricing;
 use Joaopaulolndev\FilamentGeneralSettings\FilamentGeneralSettingsPlugin;
 
 class AppPanelProvider extends PanelProvider
@@ -44,6 +45,7 @@ class AppPanelProvider extends PanelProvider
             ->discoverPages(in: app_path('Filament/App/Pages'), for: 'App\Filament\App\Pages')
             ->pages([
                 Dashboard::class,
+                Pricing::class,
             ])
             ->discoverWidgets(in: app_path('Filament/App/Widgets'), for: 'App\Filament\App\Widgets')
             ->widgets([

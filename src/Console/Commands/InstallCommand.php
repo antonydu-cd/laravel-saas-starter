@@ -95,6 +95,23 @@ class InstallCommand extends Command
         }
         $this->newLine();
 
+        // 8. 安装 Filament Payments 和 Media Library
+        $this->info('Installing Filament Payments and Media Library...');
+        if (!$this->installFilamentPayments()) {
+            $this->error('Failed to install Filament Payments.');
+            return self::FAILURE;
+        }
+        $this->newLine();
+
+        // 5.5. 配置Lago和禁用TomatoPHP插件
+        $this->info('Configuring Lago and updating AdminPanelProvider...');
+        if (!$this->configureLagoAndAdminPanel()) {
+            $this->error('Failed to configure Lago and update AdminPanelProvider.');
+            return self::FAILURE;
+        }
+
+        $this->newLine();
+
         // 6. 发布 ActivityLog 配置和迁移
         $this->info('Publishing ActivityLog configurations...');
         if (!$this->runArtisanCommand([
@@ -126,6 +143,9 @@ class InstallCommand extends Command
 
         // 复制 Jobs 文件
         $this->publishJobs($force);
+
+        // 复制 Pricing 页面视图
+        $this->publishPricingView($force);
 
         // 更新服务提供者配置
         $this->updateServiceProviders();
@@ -466,6 +486,9 @@ class InstallCommand extends Command
             'stancl/tenancy:dev-master',
             'spatie/laravel-activitylog:^4.10',
             'joaopaulolndev/filament-general-settings:^2.0',
+            'tomatophp/filament-payments:^1.0',
+            'spatie/laravel-medialibrary:^11.0',
+            'spatie/laravel-translatable:^6.0'
         ];
 
         // 检查哪些包需要在项目 composer.json 中显式声明
@@ -650,6 +673,93 @@ class InstallCommand extends Command
             $this->info('AdminPanelProvider.php is already up to date.');
         }
     }
+    /**
+     * 安装 Filament Payments 及其依赖（包括 Spatie Media Library）
+     */
+    protected function installFilamentPayments(): bool
+    {
+        // 1. 发布 Spatie Media Library 迁移文件
+        $this->info('  Publishing Spatie Media Library migrations...');
+        if (!$this->runArtisanCommand([
+            'vendor:publish',
+            '--provider=Spatie\\MediaLibrary\\MediaLibraryServiceProvider',
+            '--tag=medialibrary-migrations',
+            '--force'
+        ])) {
+            $this->error('Failed to publish Media Library migrations.');
+            return false;
+        }
+
+        // 2. 应用 patch 文件
+        $this->info('  Applying filament4.0_payment.patch...');
+        if (!$this->applyPaymentPatch()) {
+            $this->error('Failed to apply filament4.0_payment.patch.');
+            return false;
+        }
+
+        $this->info('Filament Payments installed successfully!');
+        return true;
+    }
+
+    /**
+     * 应用 filament4.0_payment.patch 补丁文件
+     */
+    protected function applyPaymentPatch(): bool
+    {
+        $patchFile = __DIR__ . '/../../../patches/filament4.0_payment.patch';
+
+        if (!File::exists($patchFile)) {
+            $this->warn("Patch file not found at {$patchFile}");
+            return false;
+        }
+
+        // 检查系统是否安装了 `patch` 命令
+        $process = new Process(['which', 'patch']);
+        $process->run();
+        if (!$process->isSuccessful()) {
+            $this->error("The 'patch' command is not available. Please install it (e.g., apt install patch on Ubuntu).");
+            return false;
+        }
+
+        // 执行 patch 命令（在项目根目录应用）
+        $command = ['patch', '-p1', '-N', '-i', $patchFile];
+        $process = new Process($command, base_path());
+        $process->setTimeout(null);
+
+        $exitCode = $process->run(function ($type, $output) {
+            $this->output->write($output);
+        });
+
+        if ($exitCode !== 0) {
+            $this->error("Failed to apply patch. Exit code: {$exitCode}");
+            return false;
+        }
+
+        $this->info("Patch applied successfully!");
+        return true;
+    }
+
+    /**
+     * 复制 Pricing 页面视图文件
+     */
+    protected function publishPricingView(bool $force = false): void
+    {
+        $sourcePath = __DIR__ . '/../../../resources/views/filament/app/pages/pricing.blade.php';
+        $targetPath = resource_path('views/filament/app/pages/pricing.blade.php');
+
+        // 确保目标目录存在
+        $targetDir = dirname($targetPath);
+        if (!File::exists($targetDir)) {
+            File::makeDirectory($targetDir, 0755, true);
+        }
+
+        if (!File::exists($sourcePath)) {
+            $this->warn("Pricing view file not found at {$sourcePath}");
+            return;
+        }
+
+        $this->copyAndReplaceFile($sourcePath, $targetPath, $force);
+    }
 
     /**
      * 运行 Artisan 命令（使用 Process，确保重新加载服务提供者）
@@ -663,6 +773,75 @@ class InstallCommand extends Command
             ->run(function ($type, $output) {
                 $this->output->write($output);
             }) === 0;
+    }
+
+    /**
+     * 配置Lago服务并更新AdminPanelProvider
+     */
+    protected function configureLagoAndAdminPanel(): bool
+    {
+        // 1. 配置services.php添加Lago设置
+        $servicesPath = config_path('services.php');
+        if (!File::exists($servicesPath)) {
+            $this->warn("Services config file not found at {$servicesPath}");
+            return false;
+        }
+
+        $content = File::get($servicesPath);
+
+        // 检查是否已经配置了Lago
+        if (!str_contains($content, "'lago' =>")) {
+            $this->info('  Adding Lago configuration to services.php...');
+
+            // 在stripe配置后添加lago配置
+            $lagoConfig = "
+    'lago' => [
+        'base_url' => env('LAGO_BASE_URL'),
+        'api_key' => env('LAGO_API_KEY'),
+        'timeout' => env('LAGO_TIMEOUT', 30),
+    ],";
+
+            // 查找stripe配置的结束位置
+            $pattern = '/(\s*\'stripe\'\s*=>\s*\[[^\]]+\],?\s*)/s';
+            if (preg_match($pattern, $content, $matches)) {
+                $replacement = $matches[1] . "\n" . $lagoConfig . "\n";
+                $content = preg_replace($pattern, $replacement, $content);
+                File::put($servicesPath, $content);
+                $this->info('  Lago configuration added to services.php');
+            } else {
+                $this->warn('  Could not find stripe configuration in services.php');
+            }
+        } else {
+            $this->info('  Lago configuration already exists in services.php');
+        }
+
+        // 2. 更新AdminPanelProvider禁用TomatoPHP插件
+        $adminPanelProviderPath = app_path('Providers/Filament/AdminPanelProvider.php');
+        if (!File::exists($adminPanelProviderPath)) {
+            $this->warn("AdminPanelProvider not found at {$adminPanelProviderPath}");
+            return false;
+        }
+
+        $content = File::get($adminPanelProviderPath);
+
+        // 检查是否需要禁用TomatoPHP插件
+        if (str_contains($content, "\\TomatoPHP\\FilamentPayments\\FilamentPaymentsPlugin::make()")) {
+            $this->info('  Disabling TomatoPHP FilamentPaymentsPlugin...');
+
+            // 将TomatoPHP插件注释掉
+            $content = str_replace(
+                "                \\TomatoPHP\\FilamentPayments\\FilamentPaymentsPlugin::make(),",
+                "                // \\TomatoPHP\\FilamentPayments\\FilamentPaymentsPlugin::make(), // 禁用TomatoPHP的payment插件，使用自定义的Payments资源",
+                $content
+            );
+
+            File::put($adminPanelProviderPath, $content);
+            $this->info('  TomatoPHP FilamentPaymentsPlugin disabled in AdminPanelProvider.php');
+        } else {
+            $this->info('  TomatoPHP plugin already disabled or not present');
+        }
+
+        return true;
     }
 
 }
