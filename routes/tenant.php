@@ -27,13 +27,20 @@ Route::middleware([
         return 'This is your multi-tenant application. The id of the current tenant is ' . tenant('id') . "\n";
     });
 
-    // Payment routes
+    // Payment routes with rate limiting
     Route::prefix('payment')->group(function () {
-        Route::get('/success', [App\Http\Controllers\Tenant\PaymentController::class, 'success'])
-            ->name('tenant.payment.success');
-        Route::get('/cancel', [App\Http\Controllers\Tenant\PaymentController::class, 'cancel'])
-            ->name('tenant.payment.cancel');
+        // Success and cancel callbacks - moderate rate limit
+        Route::middleware(['throttle:20,1'])->group(function () {
+            Route::get('/success', [App\Http\Controllers\Tenant\PaymentController::class, 'success'])
+                ->name('tenant.payment.success');
+            Route::get('/cancel', [App\Http\Controllers\Tenant\PaymentController::class, 'cancel'])
+                ->name('tenant.payment.cancel');
+        });
+
+        // Webhook - stricter rate limit and CSRF exemption
         Route::post('/webhook', [App\Http\Controllers\Tenant\PaymentController::class, 'webhook'])
+            ->middleware(['throttle:100,1'])
+            ->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class])
             ->name('tenant.payment.webhook');
     });
 });
