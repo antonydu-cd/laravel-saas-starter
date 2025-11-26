@@ -1119,7 +1119,7 @@ return [
         // 定义自定义仓库
         $customRepository = [
             'type' => 'vcs',
-            'url' => 'https://github.com/antonydu-cd/filament-payments.git'
+            'url' => 'https://github.com/jika-projects/filament-payments.git'
         ];
 
         // 检查是否已经存在该仓库配置
