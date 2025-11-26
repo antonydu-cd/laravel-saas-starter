@@ -33,7 +33,16 @@ class InstallCommand extends Command
         $this->info('Installing eBrook SaaS Starter...');
         $this->newLine();
 
-        // 1. 安装必需的依赖
+        // 1. 添加自定义 Composer 仓库配置
+        if (!$this->addCustomComposerRepositories()) {
+            $this->error('Failed to add custom Composer repositories.');
+            $this->error('Installation aborted.');
+            return self::FAILURE;
+        }
+
+        $this->newLine();
+
+        // 2. 安装必需的依赖
         if (!$this->installRequiredDependencies()) {
             $this->error('Failed to install required dependencies.');
             $this->error('Installation aborted.');
@@ -559,7 +568,7 @@ class InstallCommand extends Command
             'stancl/tenancy:dev-master',
             'spatie/laravel-activitylog:^4.10',
             'joaopaulolndev/filament-general-settings:^2.0',
-            'tomatophp/filament-payments:^1.0',
+            'tomatophp/filament-payments:dev-master',  // 使用自定义仓库的 master 分支
             'spatie/laravel-medialibrary:^11.0',
             'spatie/laravel-translatable:^6.0'
         ];
@@ -763,7 +772,7 @@ class InstallCommand extends Command
      */
     protected function installFilamentPayments(): bool
     {
-        // 1. 发布 Spatie Media Library 迁移文件
+        // 发布 Spatie Media Library 迁移文件
         $this->info('  Publishing Spatie Media Library migrations...');
         if (!$this->runArtisanCommand([
             'vendor:publish',
@@ -775,67 +784,7 @@ class InstallCommand extends Command
             return false;
         }
 
-        // 2. 应用 patch 文件
-        $this->info('  Applying filament4.0_payment.patch...');
-        if (!$this->applyPaymentPatch()) {
-            $this->error('Failed to apply filament4.0_payment.patch.');
-            return false;
-        }
-
         $this->info('Filament Payments installed successfully!');
-        return true;
-    }
-
-    /**
-     * 应用 filament4.0_payment.patch 补丁文件
-     */
-    protected function applyPaymentPatch(): bool
-    {
-        $patchFile = __DIR__ . '/../../../patches/filament4.0_payment.patch';
-
-        if (!File::exists($patchFile)) {
-            $this->warn("Patch file not found at {$patchFile}");
-            return false;
-        }
-
-        // 检查系统是否安装了 `patch` 命令
-        $process = new Process(['which', 'patch']);
-        $process->run();
-        if (!$process->isSuccessful()) {
-            $this->error("The 'patch' command is not available. Please install it (e.g., apt install patch on Ubuntu).");
-            return false;
-        }
-
-        // 执行 patch 命令（在项目根目录应用）
-        // 先尝试应用patch，如果失败则检查是否已经应用过
-        $command = ['patch', '-p1', '-N', '-i', $patchFile];
-        $process = new Process($command, base_path());
-        $process->setTimeout(null);
-
-        $exitCode = $process->run(function ($type, $output) {
-            $this->output->write($output);
-        });
-
-        if ($exitCode !== 0) {
-            // 检查是否patch已经被应用过
-            $checkCommand = ['patch', '-p1', '-R', '--dry-run', '-i', $patchFile];
-            $checkProcess = new Process($checkCommand, base_path());
-            $checkExitCode = $checkProcess->run();
-
-            if ($checkExitCode === 0) {
-                // patch已经被应用过
-                $this->info("Patch already applied, skipping...");
-                return true;
-            }
-
-            $this->error("Failed to apply patch. Exit code: {$exitCode}");
-            $this->error("Patch command output:");
-            $this->line($process->getOutput());
-            $this->line($process->getErrorOutput());
-            return false;
-        }
-
-        $this->info("Patch applied successfully!");
         return true;
     }
 
@@ -1137,6 +1086,65 @@ return [
             $this->info('filament-general-settings.php configuration is already correct');
         }
 
+        return true;
+    }
+
+    /**
+     * 添加自定义 Composer 仓库配置
+     */
+    protected function addCustomComposerRepositories(): bool
+    {
+        $this->info('Adding custom Composer repositories...');
+        $this->newLine();
+
+        $composerJsonPath = base_path('composer.json');
+        
+        if (!File::exists($composerJsonPath)) {
+            $this->error('composer.json not found.');
+            return false;
+        }
+
+        $composerJson = json_decode(File::get($composerJsonPath), true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $this->error('Failed to parse composer.json: ' . json_last_error_msg());
+            return false;
+        }
+
+        // 初始化 repositories 数组（如果不存在）
+        if (!isset($composerJson['repositories'])) {
+            $composerJson['repositories'] = [];
+        }
+
+        // 定义自定义仓库
+        $customRepository = [
+            'type' => 'vcs',
+            'url' => 'https://github.com/antonydu-cd/filament-payments.git'
+        ];
+
+        // 检查是否已经存在该仓库配置
+        $repositoryExists = false;
+        foreach ($composerJson['repositories'] as $repo) {
+            if (isset($repo['url']) && $repo['url'] === $customRepository['url']) {
+                $repositoryExists = true;
+                break;
+            }
+        }
+
+        if ($repositoryExists) {
+            $this->info('Custom repository for filament-payments already exists in composer.json');
+        } else {
+            // 添加自定义仓库到 repositories 数组开头
+            array_unshift($composerJson['repositories'], $customRepository);
+            
+            // 保存修改后的 composer.json
+            $jsonContent = json_encode($composerJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            File::put($composerJsonPath, $jsonContent . "\n");
+            
+            $this->info('Added custom repository: ' . $customRepository['url']);
+        }
+
+        $this->newLine();
         return true;
     }
 
