@@ -9,65 +9,26 @@ use Stripe\Checkout\Session;
 use Stripe\Webhook;
 use Stripe\Exception\SignatureVerificationException;
 
+use App\Traits\HasGeneralSettings;
+
 class StripeService
 {
+    use HasGeneralSettings;
+
     private string $apiKey;
     private string $webhookSecret;
 
     public function __construct()
     {
         // 只从数据库设置读取配置，完全不依赖env或config
-        $this->apiKey = (string) $this->getSetting('stripe_secret_key');
-        $this->webhookSecret = (string) $this->getSetting('stripe_webhook_secret');
+        $this->apiKey = (string) $this->getSetting('stripe_secret_key', null, true);
+        $this->webhookSecret = (string) $this->getSetting('stripe_webhook_secret', null, true);
 
         if (empty($this->apiKey)) {
             throw new \RuntimeException('Stripe API key is not configured. Please configure STRIPE settings in General Settings.');
         }
 
         Stripe::setApiKey($this->apiKey);
-    }
-
-    /**
-     * 从数据库设置中获取配置值
-     * 自动解密敏感字段
-     */
-    private function getSetting(string $key, $default = null)
-    {
-        // 验证key只包含允许的字符，防止注入
-        if (!preg_match('/^[a-z_]+$/', $key)) {
-            Log::error('Invalid setting key format', ['key' => $key]);
-            throw new \InvalidArgumentException('Invalid setting key format');
-        }
-
-        $settings = DB::table('general_settings')->first();
-        if ($settings && $settings->more_configs) {
-            $moreConfigs = json_decode($settings->more_configs, true);
-
-            if (!is_array($moreConfigs)) {
-                Log::error('Invalid more_configs format in database');
-                return $default;
-            }
-
-            $value = $moreConfigs[$key] ?? $default;
-
-            // 对敏感字段进行解密
-            if (in_array($key, ['stripe_secret_key', 'stripe_webhook_secret']) && $value !== null && $value !== '') {
-                try {
-                    return decrypt($value);
-                } catch (\Illuminate\Contracts\Encryption\DecryptException $e) {
-                    Log::error('Failed to decrypt setting - may be unencrypted legacy data', [
-                        'key' => $key,
-                        'error' => $e->getMessage(),
-                    ]);
-                    // 如果解密失败，可能是旧数据未加密，直接返回
-                    // 生产环境应该强制要求加密
-                    return $value;
-                }
-            }
-
-            return $value;
-        }
-        return $default;
     }
 
     /**

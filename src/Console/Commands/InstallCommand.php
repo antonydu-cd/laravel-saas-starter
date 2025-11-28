@@ -147,6 +147,9 @@ class InstallCommand extends Command
         // 复制 Services 文件
         $this->publishServices($force);
 
+        // 复制 Traits 文件
+        $this->publishTraits($force);
+
         // 复制 Tenant Controllers 文件
         $this->publishTenantControllers($force);
 
@@ -291,6 +294,19 @@ class InstallCommand extends Command
             base_path('app/Services'),
             $force,
             'Services'
+        );
+    }
+
+    /**
+     * 复制 Traits 文件
+     */
+    protected function publishTraits(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Traits',
+            base_path('app/Traits'),
+            $force,
+            'Traits'
         );
     }
 
