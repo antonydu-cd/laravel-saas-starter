@@ -3,12 +3,10 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\DB;
 use Stripe\Stripe;
 use Stripe\Checkout\Session;
 use Stripe\Webhook;
 use Stripe\Exception\SignatureVerificationException;
-
 use App\Traits\HasGeneralSettings;
 
 class StripeService

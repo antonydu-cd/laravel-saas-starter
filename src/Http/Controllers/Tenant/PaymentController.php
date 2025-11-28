@@ -9,7 +9,6 @@ use App\Models\Subscription;
 use App\Models\Tenant;
 use App\Services\LagoService;
 use App\Services\StripeService;
-use Filament\Notifications\Notification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
@@ -241,15 +240,28 @@ class PaymentController extends Controller
     public function webhook(Request $request)
     {
         try {
+            // 1. IP Whitelist Validation
+            if (!\App\Helpers\WebhookSecurityHelper::isValidStripeIp($request->ip())) {
+                Log::warning('Unauthorized webhook attempt', ['ip' => $request->ip()]);
+                return response()->json(['error' => 'Forbidden'], 403);
+            }
+
             $stripeService = app(StripeService::class);
 
             $payload = $request->getContent();
             $signature = $request->header('Stripe-Signature');
 
+            // 2. Log sanitization
+            $decodedPayload = json_decode($payload, true);
+            if ($decodedPayload) {
+                $sanitized = \App\Helpers\WebhookSecurityHelper::sanitizePayloadForLogging($decodedPayload);
+                Log::info('Webhook received', $sanitized);
+            }
+
             // Verify webhook signature
             $event = $stripeService->constructWebhookEvent($payload, $signature);
 
-            Log::info('Stripe webhook received', [
+            Log::info('Stripe webhook verified', [
                 'type' => $event->type,
                 'id' => $event->id,
             ]);

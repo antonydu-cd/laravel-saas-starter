@@ -4,7 +4,6 @@ namespace Ebrook\SaasStarter\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
 
 class InstallCommand extends Command
@@ -159,6 +158,15 @@ class InstallCommand extends Command
         // 复制 Pricing 页面视图
         $this->publishPricingView($force);
 
+        // 复制 Middleware 文件
+        $this->publishMiddleware($force);
+
+        // 复制 Helpers 文件
+        $this->publishHelpers($force);
+
+
+        $this->newLine();
+
         // 更新服务提供者配置
         $this->updateServiceProviders();
 
@@ -177,7 +185,19 @@ class InstallCommand extends Command
         // 更新 TenancyServiceProvider 添加 SeedTenantShield Job
         $this->updateTenancyServiceProvider();
 
-        // 清除配置缓存以确保新配置生效
+        // Update AppServiceProvider (Add Observers)
+        $this->updateAppServiceProvider();
+
+        // Register Middleware
+        $this->updateMiddlewareConfig();
+
+        $this->newLine();
+
+        // ==========================================
+        // 5. Finalization
+        // ==========================================
+        $this->info('Step 5: Finalizing installation...');
+
         $this->info('Clearing configuration cache...');
         $this->runArtisanCommand(['config:clear']);
         $this->runArtisanCommand(['config:cache']);
@@ -1156,4 +1176,217 @@ return [
         return true;
     }
 
+    /**
+     * 添加自定义 Composer 仓库配置
+     */
+    protected function addCustomComposerRepositories(): bool
+    {
+        $this->info('Adding custom Composer repositories...');
+        $this->newLine();
+
+        $composerJsonPath = base_path('composer.json');
+        
+        if (!File::exists($composerJsonPath)) {
+            $this->error('composer.json not found.');
+            return false;
+        }
+
+        $composerJson = json_decode(File::get($composerJsonPath), true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $this->error('Failed to parse composer.json: ' . json_last_error_msg());
+            return false;
+        }
+
+        // 初始化 repositories 数组（如果不存在）
+        if (!isset($composerJson['repositories'])) {
+            $composerJson['repositories'] = [];
+        }
+
+        // 定义自定义仓库
+        $customRepository = [
+            'type' => 'vcs',
+            'url' => 'https://github.com/jika-projects/filament-payments.git'
+        ];
+
+        // 检查是否已经存在该仓库配置
+        $repositoryExists = false;
+        foreach ($composerJson['repositories'] as $repo) {
+            if (isset($repo['url']) && $repo['url'] === $customRepository['url']) {
+                $repositoryExists = true;
+                break;
+            }
+        }
+
+        if ($repositoryExists) {
+            $this->info('Custom repository for filament-payments already exists in composer.json');
+        } else {
+            // 添加自定义仓库到 repositories 数组开头
+            array_unshift($composerJson['repositories'], $customRepository);
+            
+            // 保存修改后的 composer.json
+            $jsonContent = json_encode($composerJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            File::put($composerJsonPath, $jsonContent . "\n");
+            
+            $this->info('Added custom repository: ' . $customRepository['url']);
+        }
+
+        $this->newLine();
+        return true;
+    }
+
+    /**
+     * 更新 AppServiceProvider 注册 GeneralSettingObserver
+     */
+    protected function updateAppServiceProvider(): void
+    {
+        $appServiceProviderPath = base_path('app/Providers/AppServiceProvider.php');
+
+        if (!File::exists($appServiceProviderPath)) {
+            $this->warn('AppServiceProvider.php not found, skipping AppServiceProvider update...');
+            return;
+        }
+
+        $content = File::get($appServiceProviderPath);
+        $modified = false;
+
+        // 1. 添加 use 语句
+        $useStatements = [
+            'use App\Observers\GeneralSettingObserver;',
+            'use Joaopaulolndev\FilamentGeneralSettings\Models\GeneralSetting;',
+        ];
+
+        foreach ($useStatements as $useStatement) {
+            if (strpos($content, $useStatement) === false) {
+                // 在 namespace 声明后添加
+                $pattern = '/(namespace App\\\\Providers;)/';
+                if (preg_match($pattern, $content)) {
+                    $content = preg_replace($pattern, "$1\n\n{$useStatement}", $content);
+                    $this->info("Added {$useStatement} to AppServiceProvider.php");
+                    $modified = true;
+                }
+            }
+        }
+
+        // 2. 在 boot 方法中注册 Observer
+        $observerRegistration = 'GeneralSetting::observe(GeneralSettingObserver::class);';
+        
+        if (strpos($content, $observerRegistration) === false) {
+            // 查找 boot 方法
+            $pattern = '/(public function boot\(\): void\s*\{)/';
+            if (preg_match($pattern, $content)) {
+                $replacement = "$1\n        // Register the GeneralSetting observer for encryption/decryption\n        {$observerRegistration}";
+                $content = preg_replace($pattern, $replacement, $content);
+                $this->info("Registered GeneralSettingObserver in AppServiceProvider.php");
+                $modified = true;
+            } else {
+                 $this->warn("Could not find boot method in AppServiceProvider.php");
+            }
+        }
+
+        if ($modified) {
+            File::put($appServiceProviderPath, $content);
+            $this->info('AppServiceProvider.php has been updated successfully!');
+        } else {
+            $this->info('AppServiceProvider.php is already up to date.');
+        }
+    }
+
+
+
+    /**
+     * 复制 Middleware 文件
+     */
+    protected function publishMiddleware(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Http/Middleware',
+            base_path('app/Http/Middleware'),
+            $force,
+            'Middleware'
+        );
+    }
+
+    /**
+     * 复制 Helpers 文件
+     */
+    protected function publishHelpers(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Helpers',
+            base_path('app/Helpers'),
+            $force,
+            'Helpers'
+        );
+    }
+
+
+    /**
+     * 更新 Middleware 配置 (bootstrap/app.php)
+     */
+    protected function updateMiddlewareConfig(): void
+    {
+        $bootstrapAppPath = base_path('bootstrap/app.php');
+
+        if (!File::exists($bootstrapAppPath)) {
+            $this->warn('bootstrap/app.php not found, skipping middleware update...');
+            return;
+        }
+
+        $content = File::get($bootstrapAppPath);
+        $modified = false;
+
+        // 需要添加的 Middleware
+        $middlewareToAdd = [
+            '\App\Http\Middleware\ForceHttps::class',
+            '\App\Http\Middleware\SecurityHeaders::class',
+        ];
+
+        // 检查是否已经存在
+        $missingMiddleware = [];
+        foreach ($middlewareToAdd as $middleware) {
+            if (strpos($content, $middleware) === false) {
+                $missingMiddleware[] = $middleware;
+            }
+        }
+
+        if (empty($missingMiddleware)) {
+            $this->info('Middleware already registered in bootstrap/app.php');
+            return;
+        }
+
+        // 构造要添加的代码块
+        $middlewareCode = "";
+        foreach ($missingMiddleware as $middleware) {
+            $middlewareCode .= "            {$middleware},\n";
+        }
+
+        // 尝试找到 ->withMiddleware(function (Middleware $middleware): void { ... })
+        // 并添加 $middleware->append([...]);
+        
+        // 匹配 withMiddleware 闭包的开始
+        $pattern = '/(->withMiddleware\s*\(\s*function\s*\(\s*Middleware\s*\$middleware\s*\)\s*:\s*void\s*\{)/';
+        
+        if (preg_match($pattern, $content)) {
+            // 检查是否已经有 append 调用
+            if (strpos($content, '$middleware->append([') !== false) {
+                // 如果已有 append，尝试插入到数组中
+                $appendPattern = '/(\$middleware->append\(\[)/';
+                $content = preg_replace($appendPattern, "$1\n{$middlewareCode}", $content);
+                $modified = true;
+            } else {
+                // 如果没有 append，添加新的 append 调用
+                $replacement = "$1\n        \$middleware->append([\n{$middlewareCode}        ]);";
+                $content = preg_replace($pattern, $replacement, $content);
+                $modified = true;
+            }
+        } else {
+            $this->warn('Could not find withMiddleware callback in bootstrap/app.php');
+        }
+
+        if ($modified) {
+            File::put($bootstrapAppPath, $content);
+            $this->info('Registered middleware in bootstrap/app.php');
+        }
+    }
 }
