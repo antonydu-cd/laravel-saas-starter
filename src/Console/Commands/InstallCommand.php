@@ -29,198 +29,288 @@ class InstallCommand extends Command
      */
     public function handle()
     {
-        $this->info('Installing eBrook SaaS Starter...');
-        $this->newLine();
+        $this->displayWelcome();
 
-        // 1. 添加自定义 Composer 仓库配置
-        if (!$this->addCustomComposerRepositories()) {
-            $this->error('Failed to add custom Composer repositories.');
-            $this->error('Installation aborted.');
+        $totalSteps = 5;
+        $currentStep = 1;
+
+        // Phase 1: 环境准备
+        if (!$this->runPhase($currentStep++, $totalSteps, '环境准备', fn() => $this->setupEnvironment())) {
             return self::FAILURE;
         }
 
+        // Phase 2: 核心组件安装
+        if (!$this->runPhase($currentStep++, $totalSteps, '核心组件安装', fn() => $this->installCoreComponents())) {
+            return self::FAILURE;
+        }
+
+        // Phase 3: 发布文件和资源
+        if (!$this->runPhase($currentStep++, $totalSteps, '发布文件和资源', fn() => $this->publishFiles())) {
+            return self::FAILURE;
+        }
+
+        // Phase 4: 配置应用
+        if (!$this->runPhase($currentStep++, $totalSteps, '配置应用', fn() => $this->configureApplication())) {
+            return self::FAILURE;
+        }
+
+        // Phase 5: 完成安装
+        if (!$this->runPhase($currentStep++, $totalSteps, '完成安装', fn() => $this->finalizeInstallation())) {
+            return self::FAILURE;
+        }
+
+        $this->displaySuccess();
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * 显示欢迎信息
+     */
+    protected function displayWelcome(): void
+    {
         $this->newLine();
+        $this->info('╔══════════════════════════════════════════════════════════╗');
+        $this->info('║         eBrook SaaS Starter Installation                ║');
+        $this->info('╚══════════════════════════════════════════════════════════╝');
+        $this->newLine();
+    }
+
+    /**
+     * 运行安装阶段
+     */
+    protected function runPhase(int $current, int $total, string $phaseName, callable $action): bool
+    {
+        $this->info("┌─ Phase {$current}/{$total}: {$phaseName}");
+        $this->newLine();
+
+        $result = $action();
+
+        if ($result) {
+            $this->info("└─ ✓ {$phaseName} completed");
+        } else {
+            $this->error("└─ ✗ {$phaseName} failed");
+            $this->error('Installation aborted.');
+        }
+
+        $this->newLine();
+
+        return $result;
+    }
+
+    /**
+     * Phase 1: 环境准备
+     */
+    protected function setupEnvironment(): bool
+    {
+        // 1. 添加自定义 Composer 仓库
+        $this->info('  → Adding custom Composer repositories...');
+        if (!$this->addCustomComposerRepositories()) {
+            $this->error('    Failed to add custom Composer repositories.');
+            return false;
+        }
 
         // 2. 安装必需的依赖
+        $this->info('  → Installing required dependencies...');
         if (!$this->installRequiredDependencies()) {
-            $this->error('Failed to install required dependencies.');
-            $this->error('Installation aborted.');
-            return self::FAILURE;
+            $this->error('    Failed to install required dependencies.');
+            return false;
         }
 
-        $this->newLine();
-
-        // 1.5. 安装 Filament General Settings
-        $this->info('Installing Filament General Settings...');
-        if (!$this->installFilamentGeneralSettings()) {
-            $this->error('Failed to install Filament General Settings.');
-            $this->error('Installation aborted.');
-            return self::FAILURE;
-        }
-
-        $this->newLine();
-
-        // 重新发现包，确保新安装的包可用
-        $this->info('Discovering packages...');
+        // 3. 重新发现包，确保新安装的包可用
+        $this->info('  → Discovering packages...');
         $this->call('package:discover');
-        $this->newLine();
 
-        // 2. 安装 Filament 面板
-        $this->info('Installing Filament panels...');
-        if (!$this->runArtisanCommand(['filament:install', '--panels', '--no-interaction'])) {
-            $this->error('Failed to install Filament panels.');
-            return self::FAILURE;
+        return true;
+    }
+
+    /**
+     * Phase 2: 核心组件安装
+     */
+    protected function installCoreComponents(): bool
+    {
+        // 安装 Filament General Settings
+        if (!$this->installComponent('Filament General Settings', 'installFilamentGeneralSettings')) {
+            return false;
         }
-        $this->newLine();
 
-        // 3. 发布权限系统配置
-        $this->info('Publishing permission configurations...');
-        if (!$this->runArtisanCommand([
-            'vendor:publish',
-            '--tag=permission-migrations',
-            '--tag=permission-config',
-            '--tag=filament-shield-config',
-            '--force'
-        ])) {
-            $this->error('Failed to publish permission configurations.');
-            return self::FAILURE;
+        // 安装 Filament Panels
+        if (!$this->installComponent('Filament Panels', function() {
+            return $this->runArtisanCommand(['filament:install', '--panels', '--no-interaction']);
+        })) {
+            return false;
         }
-        $this->newLine();
 
-        // 4. 安装 Shield
-        $this->info('Installing Filament Shield...');
-        if (!$this->runArtisanCommand(['shield:install', 'admin'])) {
-            $this->error('Failed to install Shield.');
-            return self::FAILURE;
+        // 发布权限系统配置
+        if (!$this->installComponent('Permission System', function() {
+            return $this->runArtisanCommand([
+                'vendor:publish',
+                '--tag=permission-migrations',
+                '--tag=permission-config',
+                '--tag=filament-shield-config',
+                '--force'
+            ]);
+        })) {
+            return false;
         }
-        $this->newLine();
 
-        // 5. 安装 Tenancy
-        $this->info('Installing Tenancy...');
-        if (!$this->runArtisanCommand(['tenancy:install', '--no-interaction'])) {
-            $this->error('Failed to install Tenancy.');
-            return self::FAILURE;
+        // 安装 Filament Shield
+        if (!$this->installComponent('Filament Shield', function() {
+            return $this->runArtisanCommand(['shield:install', 'admin']);
+        })) {
+            return false;
         }
-        $this->newLine();
 
-        // 8. 安装 Filament Payments 和 Media Library
-        $this->info('Installing Filament Payments and Media Library...');
-        if (!$this->installFilamentPayments()) {
-            $this->error('Failed to install Filament Payments.');
-            return self::FAILURE;
+        // 安装 Tenancy
+        if (!$this->installComponent('Tenancy', function() {
+            return $this->runArtisanCommand(['tenancy:install', '--no-interaction']);
+        })) {
+            return false;
         }
-        $this->newLine();
 
-        // 5.5. 配置Lago和禁用TomatoPHP插件
-        $this->info('Configuring Lago and updating AdminPanelProvider...');
+        // 安装 Filament Payments & Media Library
+        if (!$this->installComponent('Filament Payments & Media Library', 'installFilamentPayments')) {
+            return false;
+        }
+
+        // 发布 ActivityLog 配置和迁移
+        if (!$this->installComponent('ActivityLog', function() {
+            return $this->runArtisanCommand([
+                'vendor:publish',
+                '--provider=Spatie\Activitylog\ActivitylogServiceProvider',
+                '--tag=activitylog-migrations',
+                '--tag=activitylog-config',
+            ]);
+        })) {
+            return false;
+        }
+
+        // 配置Lago和禁用TomatoPHP插件
+        $this->info('  → Configuring Lago and AdminPanel...');
         if (!$this->configureLagoAndAdminPanel()) {
-            $this->error('Failed to configure Lago and update AdminPanelProvider.');
-            return self::FAILURE;
+            $this->error('    Failed to configure Lago.');
+            return false;
         }
-
-        $this->newLine();
-
-        // 6. 发布 ActivityLog 配置和迁移
-        $this->info('Publishing ActivityLog configurations...');
-        if (!$this->runArtisanCommand([
-            'vendor:publish',
-            '--provider=Spatie\Activitylog\ActivitylogServiceProvider',
-            '--tag=activitylog-migrations',
-            '--tag=activitylog-config',
-        ])) {
-            $this->error('Failed to publish ActivityLog configurations.');
-            return self::FAILURE;
-        }
-        $this->newLine();
-
-        // 7. 发布 eBrook SaaS Starter 文件
-        $this->info('Publishing eBrook SaaS Starter files...');
-        $force = $this->option('force');
-
-        // 复制迁移文件
-        $this->publishMigrations($force);
-
-        // 复制 Filament 资源
-        $this->publishFilamentResources($force);
-
-        // 复制模型文件
-        $this->publishModels($force);
-
-        // 复制 Providers 文件
-        $this->publishProviders($force);
-
-        // 复制 Jobs 文件
-        $this->publishJobs($force);
-
-        // 复制 Services 文件
-        $this->publishServices($force);
-
-        // 复制 Traits 文件
-        $this->publishTraits($force);
-
-        // 复制 Tenant Controllers 文件
-        $this->publishTenantControllers($force);
-
-        // 复制 Routes 文件
-        $this->publishRoutes($force);
-
-        // 复制 Pricing 页面视图
-        $this->publishPricingView($force);
-
-        // 复制 Middleware 文件
-        $this->publishMiddleware($force);
-
-        // 复制 Helpers 文件
-        $this->publishHelpers($force);
-
-
-        $this->newLine();
-
-        // 更新服务提供者配置
-        $this->updateServiceProviders();
-
-        // 更新 AdminPanelProvider 添加 FilamentGeneralSettingsPlugin
-        $this->updateAdminPanelProvider();
-
-        // 配置 Filament General Settings
-        $this->configureFilamentGeneralSettings();
-
-        // 更新认证配置
-        $this->updateAuthConfig();
-
-        // 更新租户配置
-        $this->updateTenancyConfig();
-
-        // 更新 TenancyServiceProvider 添加 SeedTenantShield Job
-        $this->updateTenancyServiceProvider();
 
         // 配置 Tailwind CSS
-        $this->info('Setting up Tailwind CSS...');
+        $this->info('  → Setting up Tailwind CSS...');
         if (!$this->setupTailwindCss()) {
-            $this->warn('Failed to setup Tailwind CSS. You can configure it manually later.');
+            $this->warn('    Failed to setup Tailwind CSS. You can configure it manually later.');
         }
-        $this->newLine();
 
-        // 清除配置缓存以确保新配置生效
-        $this->info('Clearing configuration cache...');
+        return true;
+    }
+
+    /**
+     * 安装组件的辅助方法
+     */
+    protected function installComponent(string $name, $method): bool
+    {
+        $this->info("  → Installing {$name}...");
+        
+        $result = is_callable($method) ? $method() : $this->{$method}();
+        
+        if (!$result) {
+            $this->error("    Failed to install {$name}.");
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Phase 3: 发布文件和资源
+     */
+    protected function publishFiles(): bool
+    {
+        $this->info('  → Publishing application files...');
+        
+        $force = $this->option('force');
+
+        $publishMethods = [
+            'Migrations' => 'publishMigrations',
+            'Filament Resources' => 'publishFilamentResources',
+            'Models' => 'publishModels',
+            'Providers' => 'publishProviders',
+            'Jobs' => 'publishJobs',
+            'Services' => 'publishServices',
+            'Traits' => 'publishTraits',
+            'Tenant Controllers' => 'publishTenantControllers',
+            'Routes' => 'publishRoutes',
+            'Pricing View' => 'publishPricingView',
+            'Middleware' => 'publishMiddleware',
+            'Helpers' => 'publishHelpers',
+            'Observers' => 'publishObservers',
+        ];
+
+        foreach ($publishMethods as $name => $method) {
+            $this->comment("    • Publishing {$name}...");
+            $this->{$method}($force);
+        }
+
+        return true;
+    }
+
+    /**
+     * Phase 4: 配置应用
+     */
+    protected function configureApplication(): bool
+    {
+        $this->info('  → Updating application configurations...');
+
+        $configurations = [
+            'Service Providers' => 'updateServiceProviders',
+            'AdminPanel Provider' => 'updateAdminPanelProvider',
+            'Filament General Settings' => 'configureFilamentGeneralSettings',
+            'Auth Config' => 'updateAuthConfig',
+            'Tenancy Config' => 'updateTenancyConfig',
+            'Tenancy Service Provider' => 'updateTenancyServiceProvider',
+            'Middleware Registration' => 'updateMiddlewareConfig',
+        ];
+
+        foreach ($configurations as $name => $method) {
+            $this->comment("    • Configuring {$name}...");
+            $this->{$method}();
+        }
+
+        return true;
+    }
+
+    /**
+     * Phase 5: 完成安装
+     */
+    protected function finalizeInstallation(): bool
+    {
+        $this->info('  → Clearing and caching configuration...');
         $this->runArtisanCommand(['config:clear']);
         $this->runArtisanCommand(['config:cache']);
 
+        return true;
+    }
+
+    /**
+     * 显示成功信息
+     */
+    protected function displaySuccess(): void
+    {
         $this->newLine();
-        $this->info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        $this->info('✓ eBrook SaaS Starter has been installed successfully!');
-        $this->info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        $this->info('╔══════════════════════════════════════════════════════════╗');
+        $this->info('║     ✓ Installation Completed Successfully!              ║');
+        $this->info('╚══════════════════════════════════════════════════════════╝');
         $this->newLine();
+        
         $this->comment('All files have been published to your project.');
         $this->newLine();
-        $this->info('Next steps:');
+        
+        $this->info('Next Steps:');
         $this->line('  1. Run: npm install');
         $this->line('  2. Run: php artisan migrate');
         $this->line('  3. Run: php artisan shield:generate --all');
         $this->line('  4. Run: php artisan shield:super-admin');
         $this->newLine();
-        $this->info('You can now remove the "ebrook/b2b-saas-starter" package from');
-        $this->info('your composer.json if desired, as all files have been published.');
+        
+        $this->comment('Optional: You can remove "ebrook/b2b-saas-starter" from composer.json');
+        $this->comment('as all files have been published to your project.');
         $this->newLine();
     }
 
@@ -951,6 +1041,11 @@ return [
     // 启用自定义标签页
     'show_custom_tabs' => true,
 
+    // 自定义加密字段
+    'encrypted_fields' => [
+        # 'lago_api_key',
+    ],
+
     // 自定义配置标签页 - API和支付设置
     'custom_tabs' => [
         'api_payment_settings' => [
@@ -971,6 +1066,7 @@ return [
                     'placeholder' => 'Enter your Lago API key',
                     'required' => false,
                     'rules' => [],
+                    'encrypt' => true,
                 ],
                 'lago_timeout' => [
                     'type' => 'text',
@@ -985,6 +1081,7 @@ return [
                     'placeholder' => 'Place your Stripe Secret Key here',
                     'required' => false,
                     'rules' => [],
+                    'encrypt' => true,
                 ],
                 'stripe_publishable_key' => [
                     'type' => 'text',
@@ -992,6 +1089,7 @@ return [
                     'placeholder' => 'Place your Stripe Publishable Key here',
                     'required' => false,
                     'rules' => [],
+                    'encrypt' => true,
                 ],
             ],
         ],
@@ -1265,6 +1363,18 @@ return [
         );
     }
 
+    /**
+     * 复制 Observers 文件
+     */
+    protected function publishObservers(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Observers',
+            base_path('app/Observers'),
+            $force,
+            'Observers'
+        );
+    }
 
     /**
      * 更新 Middleware 配置 (bootstrap/app.php)
