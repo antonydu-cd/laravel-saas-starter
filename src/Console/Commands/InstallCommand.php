@@ -714,6 +714,37 @@ class InstallCommand extends Command
         // 取消注释 Livewire::setUpdateRoute (第 204-206 行)
         // 检查代码是否已经被注释
         if (strpos($content, '// Livewire::setUpdateRoute(function ($handle)') !== false) {
+            // 首先检查并添加 use Livewire\Livewire; 语句
+            if (strpos($content, 'use Livewire\Livewire;') === false) {
+                // 查找最后一个 use 语句，在其后添加
+                // 匹配所有 use 语句行
+                if (preg_match_all('/^(use [^;]+;)$/m', $content, $matches, PREG_OFFSET_CAPTURE)) {
+                    // 获取最后一个 use 语句
+                    $lastMatch = end($matches[0]);
+                    $lastUseLine = $lastMatch[0];
+                    $lastUsePos = $lastMatch[1];
+
+                    // 找到该行的结束位置（换行符）
+                    $lineEndPos = strpos($content, "\n", $lastUsePos);
+                    if ($lineEndPos !== false) {
+                        // 在最后一个 use 语句后添加新的 use 语句
+                        $newUse = "use Livewire\Livewire;\n";
+                        $content = substr_replace($content, $lastUseLine . "\n" . $newUse, $lastUsePos, $lineEndPos - $lastUsePos + 1);
+                        $this->info('Added use Livewire\Livewire; to TenancyServiceProvider.php');
+                        $modified = true;
+                    }
+                } else {
+                    // 如果找不到 use 语句，在 namespace 后添加
+                    $content = preg_replace(
+                        '/(namespace App\\\\Providers;[\r\n]+)/',
+                        '$1use Livewire\Livewire;' . "\n",
+                        $content
+                    );
+                    $this->info('Added use Livewire\Livewire; to TenancyServiceProvider.php');
+                    $modified = true;
+                }
+            }
+
             // 使用多行模式匹配注释的代码块
             $pattern = '/(\/\/\s*To make Livewire v3 work with Tenancy, make the update route universal\.\s*[\r\n]+\s*\/\/\s*Livewire::setUpdateRoute\(function \(\$handle\) \{[\r\n]+\s*\/\/\s*return RouteFacade::post\(\'\/livewire\/update\', \$handle\)->middleware\(\[\'web\', \'universal\', \\\\Stancl\\\\Tenancy\\\\Tenancy::defaultMiddleware\(\)\]\);[\r\n]+\s*\/\/\s*\}\);)/m';
             if (preg_match($pattern, $content)) {
@@ -737,8 +768,28 @@ class InstallCommand extends Command
                 }
             }
         } elseif (strpos($content, 'Livewire::setUpdateRoute(function ($handle)') !== false && strpos($content, '// Livewire::setUpdateRoute') === false) {
-            // 如果代码已经取消注释，不需要修改
-            $this->info('Livewire::setUpdateRoute is already uncommented in TenancyServiceProvider.php');
+            // 如果代码已经取消注释，检查是否需要添加 use 语句
+            if (strpos($content, 'use Livewire\Livewire;') === false) {
+                // 查找最后一个 use 语句，在其后添加
+                if (preg_match_all('/^(use [^;]+;)$/m', $content, $matches, PREG_OFFSET_CAPTURE)) {
+                    // 获取最后一个 use 语句
+                    $lastMatch = end($matches[0]);
+                    $lastUseLine = $lastMatch[0];
+                    $lastUsePos = $lastMatch[1];
+
+                    // 找到该行的结束位置（换行符）
+                    $lineEndPos = strpos($content, "\n", $lastUsePos);
+                    if ($lineEndPos !== false) {
+                        // 在最后一个 use 语句后添加新的 use 语句
+                        $newUse = "use Livewire\Livewire;\n";
+                        $content = substr_replace($content, $lastUseLine . "\n" . $newUse, $lastUsePos, $lineEndPos - $lastUsePos + 1);
+                        $this->info('Added use Livewire\Livewire; to TenancyServiceProvider.php');
+                        $modified = true;
+                    }
+                }
+            } else {
+                $this->info('Livewire::setUpdateRoute is already uncommented in TenancyServiceProvider.php');
+            }
         }
 
         if ($modified) {
