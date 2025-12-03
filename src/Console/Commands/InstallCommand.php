@@ -695,23 +695,57 @@ class InstallCommand extends Command
         }
 
         $content = File::get($providerPath);
+        $modified = false;
 
         // 检查是否已经存在 SeedTenantShield
-        if (strpos($content, 'SeedTenantShield::class') !== false) {
-            $this->info('SeedTenantShield::class already exists in TenancyServiceProvider.php');
-            return;
+        if (strpos($content, 'SeedTenantShield::class') === false) {
+            // 在 Jobs\MigrateDatabase::class 之后添加 \App\Jobs\SeedTenantShield::class
+            $pattern = '/(Jobs\\\\MigrateDatabase::class,)/';
+            if (preg_match($pattern, $content)) {
+                $replacement = "$1\n                    \\App\\Jobs\\SeedTenantShield::class,";
+                $content = preg_replace($pattern, $replacement, $content);
+                $this->info('Added \\App\\Jobs\\SeedTenantShield::class to TenancyServiceProvider.php JobPipeline');
+                $modified = true;
+            } else {
+                $this->warn('Could not find Jobs\\MigrateDatabase::class in TenancyServiceProvider.php');
+            }
         }
 
-        // 在 Jobs\MigrateDatabase::class 之后添加 \App\Jobs\SeedTenantShield::class
-        $pattern = '/(Jobs\\\\MigrateDatabase::class,)/';
-        if (preg_match($pattern, $content)) {
-            $replacement = "$1\n                    \\App\\Jobs\\SeedTenantShield::class,";
-            $content = preg_replace($pattern, $replacement, $content);
+        // 取消注释 Livewire::setUpdateRoute (第 204-206 行)
+        // 检查代码是否已经被注释
+        if (strpos($content, '// Livewire::setUpdateRoute(function ($handle)') !== false) {
+            // 使用多行模式匹配注释的代码块
+            $pattern = '/(\/\/\s*To make Livewire v3 work with Tenancy, make the update route universal\.\s*[\r\n]+\s*\/\/\s*Livewire::setUpdateRoute\(function \(\$handle\) \{[\r\n]+\s*\/\/\s*return RouteFacade::post\(\'\/livewire\/update\', \$handle\)->middleware\(\[\'web\', \'universal\', \\\\Stancl\\\\Tenancy\\\\Tenancy::defaultMiddleware\(\)\]\);[\r\n]+\s*\/\/\s*\}\);)/m';
+            if (preg_match($pattern, $content)) {
+                $uncommentedCode = "// To make Livewire v3 work with Tenancy, make the update route universal.
+        Livewire::setUpdateRoute(function (\$handle) {
+            return RouteFacade::post('/livewire/update', \$handle)->middleware(['web', 'universal', \\Stancl\\Tenancy\\Tenancy::defaultMiddleware()]);
+        });";
+                $content = preg_replace($pattern, $uncommentedCode, $content);
+                $this->info('Uncommented Livewire::setUpdateRoute in TenancyServiceProvider.php');
+                $modified = true;
+            } else {
+                // 如果上面的模式不匹配，尝试只匹配三行注释（不包括前面的说明注释）
+                $simplePattern = '/(\/\/\s*Livewire::setUpdateRoute\(function \(\$handle\) \{[\r\n]+\s*\/\/\s*return RouteFacade::post\(\'\/livewire\/update\', \$handle\)->middleware\(\[\'web\', \'universal\', \\\\Stancl\\\\Tenancy\\\\Tenancy::defaultMiddleware\(\)\]\);[\r\n]+\s*\/\/\s*\}\);)/m';
+                if (preg_match($simplePattern, $content)) {
+                    $uncommentedCode = "Livewire::setUpdateRoute(function (\$handle) {
+            return RouteFacade::post('/livewire/update', \$handle)->middleware(['web', 'universal', \\Stancl\\Tenancy\\Tenancy::defaultMiddleware()]);
+        });";
+                    $content = preg_replace($simplePattern, $uncommentedCode, $content);
+                    $this->info('Uncommented Livewire::setUpdateRoute in TenancyServiceProvider.php');
+                    $modified = true;
+                }
+            }
+        } elseif (strpos($content, 'Livewire::setUpdateRoute(function ($handle)') !== false && strpos($content, '// Livewire::setUpdateRoute') === false) {
+            // 如果代码已经取消注释，不需要修改
+            $this->info('Livewire::setUpdateRoute is already uncommented in TenancyServiceProvider.php');
+        }
 
+        if ($modified) {
             File::put($providerPath, $content);
-            $this->info('Added \\App\\Jobs\\SeedTenantShield::class to TenancyServiceProvider.php JobPipeline');
+            $this->info('TenancyServiceProvider.php has been updated successfully!');
         } else {
-            $this->warn('Could not find Jobs\\MigrateDatabase::class in TenancyServiceProvider.php');
+            $this->info('TenancyServiceProvider.php is already up to date.');
         }
     }
 
