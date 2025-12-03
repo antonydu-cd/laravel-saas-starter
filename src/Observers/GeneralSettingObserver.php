@@ -4,6 +4,7 @@ namespace App\Observers;
 
 use Illuminate\Support\Facades\Crypt;
 use Joaopaulolndev\FilamentGeneralSettings\Models\GeneralSetting;
+use Illuminate\Support\Facades\Log;
 
 class GeneralSettingObserver
 {
@@ -79,7 +80,7 @@ class GeneralSettingObserver
                     }
                 } catch (\Exception $e) {
                     // If encryption fails, keep original value
-                    \Log::error("Failed to encrypt field {$field}: " . $e->getMessage());
+                    Log::error("Failed to encrypt field {$field}: " . $e->getMessage());
                 }
             }
         }

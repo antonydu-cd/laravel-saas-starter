@@ -43,8 +43,24 @@ class PaymentController extends Controller
                             ->with('info', 'Payment has already been processed.');
                     }
 
-                    // 标记为处理中，防止并发
-                    $existingPayment->update(['status' => 'processing']);
+                    // 如果状态不是 pending，说明可能正在处理或已失败，记录日志
+                    if (!$existingPayment->isPending()) {
+                        Log::warning('Payment is not in pending status', [
+                            'session_id' => $sessionId,
+                            'payment_id' => $existingPayment->id,
+                            'current_status' => $existingPayment->status,
+                            'ip' => request()->ip(),
+                        ]);
+                        // 如果已失败，允许重试；其他状态则返回
+                        if ($existingPayment->isFailed()) {
+                            // 重置为 pending 以允许重试
+                            $existingPayment->update(['status' => 'pending']);
+                        } else {
+                            return redirect()->route('filament.app.pages.pricing')
+                                ->with('error', 'Payment is already being processed. Please wait.');
+                        }
+                    }
+                    // 注意：使用 lockForUpdate() 已经防止了并发，不需要额外设置状态
                 }
 
                 // Retrieve session from Stripe

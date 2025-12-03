@@ -230,12 +230,15 @@ class InstallCommand extends Command
         $publishMethods = [
             'Migrations' => 'publishMigrations',
             'Filament Resources' => 'publishFilamentResources',
+            'Filament Pages' => 'publishFilamentPages',
+            'Plugins' => 'publishPlugins',
             'Models' => 'publishModels',
             'Providers' => 'publishProviders',
             'Jobs' => 'publishJobs',
             'Services' => 'publishServices',
             'Traits' => 'publishTraits',
             'Tenant Controllers' => 'publishTenantControllers',
+            'Requests' => "publishRequests",
             'Routes' => 'publishRoutes',
             'Pricing View' => 'publishPricingView',
             'Middleware' => 'publishMiddleware',
@@ -266,6 +269,7 @@ class InstallCommand extends Command
             'Tenancy Config' => 'updateTenancyConfig',
             'Tenancy Service Provider' => 'updateTenancyServiceProvider',
             'Middleware Registration' => 'updateMiddlewareConfig',
+            'App Service Provider' => 'updateAppServiceProvider',
         ];
 
         foreach ($configurations as $name => $method) {
@@ -348,16 +352,55 @@ class InstallCommand extends Command
     }
 
     /**
-     * 复制 Filament 资源文件
+     * 复制 Filament 资源文件（排除 Pages，因为 Pages 单独发布）
      */
     protected function publishFilamentResources(bool $force = false): void
     {
-        $this->publishDirectory(
-            __DIR__ . '/../../../src/Filament',
-            base_path('app/Filament'),
-            $force,
-            'Filament'
-        );
+        // 发布 Filament 目录，但排除 Pages 目录（因为 Pages 单独发布）
+        $sourcePath = __DIR__ . '/../../Filament';
+        $targetPath = base_path('app/Filament');
+
+        if (!File::exists($sourcePath)) {
+            $this->warn("Filament directory not found at {$sourcePath}");
+            return;
+        }
+
+        // 确保目标目录存在
+        if (!File::exists($targetPath)) {
+            File::makeDirectory($targetPath, 0755, true);
+        }
+
+        // 复制 Resources 目录
+        if (File::exists($sourcePath . '/Resources')) {
+            $this->publishDirectory(
+                $sourcePath . '/Resources',
+                $targetPath . '/Resources',
+                $force,
+                'Filament Resources'
+            );
+        }
+
+        // 复制 App 目录（排除 Pages）
+        if (File::exists($sourcePath . '/App')) {
+            $appSourcePath = $sourcePath . '/App';
+            $appTargetPath = $targetPath . '/App';
+
+            if (!File::exists($appTargetPath)) {
+                File::makeDirectory($appTargetPath, 0755, true);
+            }
+
+            // 复制 App/Resources
+            if (File::exists($appSourcePath . '/Resources')) {
+                $this->publishDirectory(
+                    $appSourcePath . '/Resources',
+                    $appTargetPath . '/Resources',
+                    $force,
+                    'Filament App Resources'
+                );
+            }
+
+            // 不复制 App/Pages，因为会单独发布
+        }
     }
 
     /**
@@ -400,6 +443,32 @@ class InstallCommand extends Command
     }
 
     /**
+     * 复制 Filament Pages 文件
+     */
+    protected function publishFilamentPages(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Filament/Pages',
+            base_path('app/Filament/Pages'),
+            $force,
+            'Filament Pages'
+        );
+    }
+
+    /**
+     * 复制 Plugins 文件
+     */
+    protected function publishPlugins(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Plugins',
+            base_path('app/Plugins'),
+            $force,
+            'Plugins'
+        );
+    }
+
+    /**
      * 复制 Services 文件
      */
     protected function publishServices(bool $force = false): void
@@ -435,6 +504,19 @@ class InstallCommand extends Command
             base_path('app/Http/Controllers/Tenant'),
             $force,
             'Tenant Controllers'
+        );
+    }
+
+    /**
+     * 复制 Requests 文件
+     */
+    protected function publishRequests(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Http/Requests',
+            base_path('app/Http/Requests'),
+            $force,
+            'Requests'
         );
     }
 
@@ -833,9 +915,16 @@ class InstallCommand extends Command
         $content = File::get($adminPanelProviderPath);
         $modified = false;
 
-        // 1. 添加 FilamentGeneralSettingsPlugin 的 use 语句
-        $useStatement = 'use Joaopaulolndev\FilamentGeneralSettings\FilamentGeneralSettingsPlugin;';
+        // 1. 添加 CustomFilamentGeneralSettingsPlugin 的 use 语句
+        $useStatement = 'use App\Plugins\CustomFilamentGeneralSettingsPlugin;';
         if (strpos($content, $useStatement) === false) {
+            // 移除旧的 FilamentGeneralSettingsPlugin use 语句（如果存在）
+            $content = preg_replace(
+                '/use Joaopaulolndev\\\\FilamentGeneralSettings\\\\FilamentGeneralSettingsPlugin;[\r\n]*/',
+                '',
+                $content
+            );
+
             // 在 use Illuminate\View\Middleware\ShareErrorsFromSession; 后面添加
             $content = preg_replace(
                 '/(use Illuminate\\\\View\\\\Middleware\\\\ShareErrorsFromSession;)/',
@@ -843,7 +932,7 @@ class InstallCommand extends Command
                 $content
             );
 
-            $this->info("Added FilamentGeneralSettingsPlugin use statement to AdminPanelProvider.php");
+            $this->info("Added CustomFilamentGeneralSettingsPlugin use statement to AdminPanelProvider.php");
             $modified = true;
         }
 
@@ -859,10 +948,17 @@ class InstallCommand extends Command
             $modified = true;
         }
 
-        // 3. 添加 FilamentGeneralSettingsPlugin 到 plugins 配置中
-        if (!preg_match('/->plugins\(\s*\[.*FilamentGeneralSettingsPlugin::make\(\).*?\]\s*\)/s', $content)) {
+        // 3. 添加或更新 CustomFilamentGeneralSettingsPlugin 到 plugins 配置中
+        // 先移除旧的 FilamentGeneralSettingsPlugin（如果存在）
+        $content = preg_replace(
+            '/\s*FilamentGeneralSettingsPlugin::make\(\)[^,]*,[\r\n]*/',
+            '',
+            $content
+        );
+
+        if (!preg_match('/->plugins\(\s*\[.*CustomFilamentGeneralSettingsPlugin::make\(\).*?\]\s*\)/s', $content)) {
             // 在 FilamentShieldPlugin 之后添加
-            $pluginConfig = "                FilamentGeneralSettingsPlugin::make()
+            $pluginConfig = "                CustomFilamentGeneralSettingsPlugin::make()
                     ->setSort(3)
                     ->setIcon('heroicon-o-cog')
                     ->setNavigationGroup('System')
@@ -875,7 +971,7 @@ class InstallCommand extends Command
             if (preg_match($pattern, $content, $matches)) {
                 $replacement = $matches[1] . ',' . "\n" . $pluginConfig . "\n" . $matches[2];
                 $content = preg_replace($pattern, $replacement, $content);
-                $this->info("Added FilamentGeneralSettingsPlugin to AdminPanelProvider.php");
+                $this->info("Added CustomFilamentGeneralSettingsPlugin to AdminPanelProvider.php");
                 $modified = true;
             } else {
                 $this->warn("Could not find FilamentShieldPlugin::make() in AdminPanelProvider.php plugins array");
@@ -889,6 +985,7 @@ class InstallCommand extends Command
             $this->info('AdminPanelProvider.php is already up to date.');
         }
     }
+
     /**
      * 安装 Filament Payments 及其依赖（包括 Spatie Media Library）
      */
@@ -1059,6 +1156,7 @@ return [
                     'placeholder' => 'https://api.lago.dev',
                     'required' => false,
                     'rules' => [],
+                    'visible_in_panels' => ['admin'], // 只在中央控制台显示
                 ],
                 'lago_api_key' => [
                     'type' => 'password',
@@ -1067,6 +1165,7 @@ return [
                     'required' => false,
                     'rules' => [],
                     'encrypt' => true,
+                    'visible_in_panels' => ['admin'],
                 ],
                 'lago_timeout' => [
                     'type' => 'text',
@@ -1074,6 +1173,7 @@ return [
                     'placeholder' => '30',
                     'required' => false,
                     'rules' => [],
+                    'visible_in_panels' => ['admin'],
                 ],
                 'stripe_secret_key' => [
                     'type' => 'password',
@@ -1082,6 +1182,7 @@ return [
                     'required' => false,
                     'rules' => [],
                     'encrypt' => true,
+                    'visible_in_panels' => ['admin', 'app'],
                 ],
                 'stripe_publishable_key' => [
                     'type' => 'text',
@@ -1090,6 +1191,7 @@ return [
                     'required' => false,
                     'rules' => [],
                     'encrypt' => true,
+                    'visible_in_panels' => ['admin', 'app'], // 在中央控制台和租户控制台都显示
                 ],
             ],
         ],
@@ -1147,8 +1249,6 @@ return [
     // 自定义加密字段
     'encrypted_fields' => [
         # 'lago_api_key',
-        # 'stripe_secret_key',
-        # 'stripe_publishable_key',
     ],
 
     // 自定义配置标签页 - API和支付设置
@@ -1164,6 +1264,7 @@ return [
                     'placeholder' => 'https://api.lago.dev',
                     'required' => false,
                     'rules' => [],
+                    'visible_in_panels' => ['admin'], // 只在中央控制台显示
                 ],
                 'lago_api_key' => [
                     'type' => 'password',
@@ -1172,6 +1273,7 @@ return [
                     'required' => false,
                     'rules' => [],
                     'encrypt' => true,
+                    'visible_in_panels' => ['admin'],
                 ],
                 'lago_timeout' => [
                     'type' => 'text',
@@ -1179,6 +1281,7 @@ return [
                     'placeholder' => '30',
                     'required' => false,
                     'rules' => [],
+                    'visible_in_panels' => ['admin'],
                 ],
                 'stripe_secret_key' => [
                     'type' => 'password',
@@ -1187,6 +1290,7 @@ return [
                     'required' => false,
                     'rules' => [],
                     'encrypt' => true,
+                    'visible_in_panels' => ['admin', 'app'],
                 ],
                 'stripe_publishable_key' => [
                     'type' => 'text',
@@ -1195,6 +1299,7 @@ return [
                     'required' => false,
                     'rules' => [],
                     'encrypt' => true,
+                    'visible_in_panels' => ['admin', 'app'], // 在中央控制台和租户控制台都显示
                 ],
             ],
         ],
@@ -1344,8 +1449,6 @@ return [
             $this->info('AppServiceProvider.php is already up to date.');
         }
     }
-
-
 
     /**
      * 复制 Middleware 文件

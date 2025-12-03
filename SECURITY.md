@@ -247,7 +247,7 @@ php artisan tinker
 
 - [ ] **注册安全中间件**
 ```php
-// app/Http/Kernel.php
+// bootstrap/app.php
 protected $middleware = [
     \App\Http\Middleware\ForceHttps::class,
     \App\Http\Middleware\SecurityHeaders::class,
