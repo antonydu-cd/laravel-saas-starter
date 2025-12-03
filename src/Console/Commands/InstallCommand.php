@@ -352,55 +352,16 @@ class InstallCommand extends Command
     }
 
     /**
-     * 复制 Filament 资源文件（排除 Pages，因为 Pages 单独发布）
+     * 复制 Filament 资源文件
      */
     protected function publishFilamentResources(bool $force = false): void
     {
-        // 发布 Filament 目录，但排除 Pages 目录（因为 Pages 单独发布）
-        $sourcePath = __DIR__ . '/../../Filament';
-        $targetPath = base_path('app/Filament');
-
-        if (!File::exists($sourcePath)) {
-            $this->warn("Filament directory not found at {$sourcePath}");
-            return;
-        }
-
-        // 确保目标目录存在
-        if (!File::exists($targetPath)) {
-            File::makeDirectory($targetPath, 0755, true);
-        }
-
-        // 复制 Resources 目录
-        if (File::exists($sourcePath . '/Resources')) {
-            $this->publishDirectory(
-                $sourcePath . '/Resources',
-                $targetPath . '/Resources',
-                $force,
-                'Filament Resources'
-            );
-        }
-
-        // 复制 App 目录（排除 Pages）
-        if (File::exists($sourcePath . '/App')) {
-            $appSourcePath = $sourcePath . '/App';
-            $appTargetPath = $targetPath . '/App';
-
-            if (!File::exists($appTargetPath)) {
-                File::makeDirectory($appTargetPath, 0755, true);
-            }
-
-            // 复制 App/Resources
-            if (File::exists($appSourcePath . '/Resources')) {
-                $this->publishDirectory(
-                    $appSourcePath . '/Resources',
-                    $appTargetPath . '/Resources',
-                    $force,
-                    'Filament App Resources'
-                );
-            }
-
-            // 不复制 App/Pages，因为会单独发布
-        }
+        $this->publishDirectory(
+            __DIR__ . '/../../../src/Filament',
+            base_path('app/Filament'),
+            $force,
+            'Filament'
+        );
     }
 
     /**
