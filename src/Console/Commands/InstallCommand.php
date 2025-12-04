@@ -4,7 +4,6 @@ namespace Ebrook\SaasStarter\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
 
 class InstallCommand extends Command
@@ -14,7 +13,7 @@ class InstallCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'ebrook-saas:install 
+    protected $signature = 'ebrook-saas:install
                             {--force : Overwrite existing files}
                             {--composer=global : Absolute path to the Composer binary which should be used to install packages}';
 
@@ -30,186 +29,292 @@ class InstallCommand extends Command
      */
     public function handle()
     {
-        $this->info('Installing eBrook SaaS Starter...');
-        $this->newLine();
+        $this->displayWelcome();
 
-        // 1. 添加自定义 Composer 仓库配置
-        if (!$this->addCustomComposerRepositories()) {
-            $this->error('Failed to add custom Composer repositories.');
-            $this->error('Installation aborted.');
+        $totalSteps = 5;
+        $currentStep = 1;
+
+        // Phase 1: 环境准备
+        if (!$this->runPhase($currentStep++, $totalSteps, '环境准备', fn() => $this->setupEnvironment())) {
             return self::FAILURE;
         }
 
+        // Phase 2: 核心组件安装
+        if (!$this->runPhase($currentStep++, $totalSteps, '核心组件安装', fn() => $this->installCoreComponents())) {
+            return self::FAILURE;
+        }
+
+        // Phase 3: 发布文件和资源
+        if (!$this->runPhase($currentStep++, $totalSteps, '发布文件和资源', fn() => $this->publishFiles())) {
+            return self::FAILURE;
+        }
+
+        // Phase 4: 配置应用
+        if (!$this->runPhase($currentStep++, $totalSteps, '配置应用', fn() => $this->configureApplication())) {
+            return self::FAILURE;
+        }
+
+        // Phase 5: 完成安装
+        if (!$this->runPhase($currentStep++, $totalSteps, '完成安装', fn() => $this->finalizeInstallation())) {
+            return self::FAILURE;
+        }
+
+        $this->displaySuccess();
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * 显示欢迎信息
+     */
+    protected function displayWelcome(): void
+    {
         $this->newLine();
+        $this->info('╔══════════════════════════════════════════════════════════╗');
+        $this->info('║         eBrook SaaS Starter Installation                ║');
+        $this->info('╚══════════════════════════════════════════════════════════╝');
+        $this->newLine();
+    }
+
+    /**
+     * 运行安装阶段
+     */
+    protected function runPhase(int $current, int $total, string $phaseName, callable $action): bool
+    {
+        $this->info("┌─ Phase {$current}/{$total}: {$phaseName}");
+        $this->newLine();
+
+        $result = $action();
+
+        if ($result) {
+            $this->info("└─ ✓ {$phaseName} completed");
+        } else {
+            $this->error("└─ ✗ {$phaseName} failed");
+            $this->error('Installation aborted.');
+        }
+
+        $this->newLine();
+
+        return $result;
+    }
+
+    /**
+     * Phase 1: 环境准备
+     */
+    protected function setupEnvironment(): bool
+    {
+        // 1. 添加自定义 Composer 仓库
+        $this->info('  → Adding custom Composer repositories...');
+        if (!$this->addCustomComposerRepositories()) {
+            $this->error('    Failed to add custom Composer repositories.');
+            return false;
+        }
 
         // 2. 安装必需的依赖
+        $this->info('  → Installing required dependencies...');
         if (!$this->installRequiredDependencies()) {
-            $this->error('Failed to install required dependencies.');
-            $this->error('Installation aborted.');
-            return self::FAILURE;
+            $this->error('    Failed to install required dependencies.');
+            return false;
         }
 
-        $this->newLine();
-
-        // 1.5. 安装 Filament General Settings
-        $this->info('Installing Filament General Settings...');
-        if (!$this->installFilamentGeneralSettings()) {
-            $this->error('Failed to install Filament General Settings.');
-            $this->error('Installation aborted.');
-            return self::FAILURE;
-        }
-
-        $this->newLine();
-
-        // 重新发现包，确保新安装的包可用
-        $this->info('Discovering packages...');
+        // 3. 重新发现包，确保新安装的包可用
+        $this->info('  → Discovering packages...');
         $this->call('package:discover');
-        $this->newLine();
 
-        // 2. 安装 Filament 面板
-        $this->info('Installing Filament panels...');
-        if (!$this->runArtisanCommand(['filament:install', '--panels', '--no-interaction'])) {
-            $this->error('Failed to install Filament panels.');
-            return self::FAILURE;
+        return true;
+    }
+
+    /**
+     * Phase 2: 核心组件安装
+     */
+    protected function installCoreComponents(): bool
+    {
+        // 安装 Filament General Settings
+        if (!$this->installComponent('Filament General Settings', 'installFilamentGeneralSettings')) {
+            return false;
         }
-        $this->newLine();
 
-        // 3. 发布权限系统配置
-        $this->info('Publishing permission configurations...');
-        if (!$this->runArtisanCommand([
-            'vendor:publish',
-            '--tag=permission-migrations',
-            '--tag=permission-config',
-            '--tag=filament-shield-config',
-            '--force'
-        ])) {
-            $this->error('Failed to publish permission configurations.');
-            return self::FAILURE;
+        // 安装 Filament Panels
+        if (!$this->installComponent('Filament Panels', function() {
+            return $this->runArtisanCommand(['filament:install', '--panels', '--no-interaction']);
+        })) {
+            return false;
         }
-        $this->newLine();
 
-        // 4. 安装 Shield
-        $this->info('Installing Filament Shield...');
-        if (!$this->runArtisanCommand(['shield:install', 'admin'])) {
-            $this->error('Failed to install Shield.');
-            return self::FAILURE;
+        // 发布权限系统配置
+        if (!$this->installComponent('Permission System', function() {
+            return $this->runArtisanCommand([
+                'vendor:publish',
+                '--tag=permission-migrations',
+                '--tag=permission-config',
+                '--tag=filament-shield-config',
+                '--force'
+            ]);
+        })) {
+            return false;
         }
-        $this->newLine();
 
-        // 5. 安装 Tenancy
-        $this->info('Installing Tenancy...');
-        if (!$this->runArtisanCommand(['tenancy:install', '--no-interaction'])) {
-            $this->error('Failed to install Tenancy.');
-            return self::FAILURE;
+        // 安装 Filament Shield
+        if (!$this->installComponent('Filament Shield', function() {
+            return $this->runArtisanCommand(['shield:install', 'admin']);
+        })) {
+            return false;
         }
-        $this->newLine();
 
-        // 8. 安装 Filament Payments 和 Media Library
-        $this->info('Installing Filament Payments and Media Library...');
-        if (!$this->installFilamentPayments()) {
-            $this->error('Failed to install Filament Payments.');
-            return self::FAILURE;
+        // 安装 Tenancy
+        if (!$this->installComponent('Tenancy', function() {
+            return $this->runArtisanCommand(['tenancy:install', '--no-interaction']);
+        })) {
+            return false;
         }
-        $this->newLine();
 
-        // 5.5. 配置Lago和禁用TomatoPHP插件
-        $this->info('Configuring Lago and updating AdminPanelProvider...');
+        // 安装 Filament Payments & Media Library
+        if (!$this->installComponent('Filament Payments & Media Library', 'installFilamentPayments')) {
+            return false;
+        }
+
+        // 发布 ActivityLog 配置和迁移
+        if (!$this->installComponent('ActivityLog', function() {
+            return $this->runArtisanCommand([
+                'vendor:publish',
+                '--provider=Spatie\Activitylog\ActivitylogServiceProvider',
+                '--tag=activitylog-migrations',
+                '--tag=activitylog-config',
+            ]);
+        })) {
+            return false;
+        }
+
+        // 配置Lago和禁用TomatoPHP插件
+        $this->info('  → Configuring Lago and AdminPanel...');
         if (!$this->configureLagoAndAdminPanel()) {
-            $this->error('Failed to configure Lago and update AdminPanelProvider.');
-            return self::FAILURE;
+            $this->error('    Failed to configure Lago.');
+            return false;
         }
-
-        $this->newLine();
-
-        // 6. 发布 ActivityLog 配置和迁移
-        $this->info('Publishing ActivityLog configurations...');
-        if (!$this->runArtisanCommand([
-            'vendor:publish',
-            '--provider=Spatie\Activitylog\ActivitylogServiceProvider',
-            '--tag=activitylog-migrations',
-            '--tag=activitylog-config',
-        ])) {
-            $this->error('Failed to publish ActivityLog configurations.');
-            return self::FAILURE;
-        }
-        $this->newLine();
-
-        // 7. 发布 eBrook SaaS Starter 文件
-        $this->info('Publishing eBrook SaaS Starter files...');
-        $force = $this->option('force');
-
-        // 复制迁移文件
-        $this->publishMigrations($force);
-
-        // 复制 Filament 资源
-        $this->publishFilamentResources($force);
-
-        // 复制模型文件
-        $this->publishModels($force);
-
-        // 复制 Providers 文件
-        $this->publishProviders($force);
-
-        // 复制 Jobs 文件
-        $this->publishJobs($force);
-
-        // 复制 Services 文件
-        $this->publishServices($force);
-
-        // 复制 Tenant Controllers 文件
-        $this->publishTenantControllers($force);
-
-        // 复制 Routes 文件
-        $this->publishRoutes($force);
-
-        // 复制 Pricing 页面视图
-        $this->publishPricingView($force);
-
-        // 更新服务提供者配置
-        $this->updateServiceProviders();
-
-        // 更新 AdminPanelProvider 添加 FilamentGeneralSettingsPlugin
-        $this->updateAdminPanelProvider();
-
-        // 配置 Filament General Settings
-        $this->configureFilamentGeneralSettings();
-
-        // 更新认证配置
-        $this->updateAuthConfig();
-
-        // 更新租户配置
-        $this->updateTenancyConfig();
-
-        // 更新 TenancyServiceProvider 添加 SeedTenantShield Job
-        $this->updateTenancyServiceProvider();
 
         // 配置 Tailwind CSS
-        $this->info('Setting up Tailwind CSS...');
+        $this->info('  → Setting up Tailwind CSS...');
         if (!$this->setupTailwindCss()) {
-            $this->warn('Failed to setup Tailwind CSS. You can configure it manually later.');
+            $this->warn('    Failed to setup Tailwind CSS. You can configure it manually later.');
         }
-        $this->newLine();
 
-        // 清除配置缓存以确保新配置生效
-        $this->info('Clearing configuration cache...');
+        return true;
+    }
+
+    /**
+     * 安装组件的辅助方法
+     */
+    protected function installComponent(string $name, $method): bool
+    {
+        $this->info("  → Installing {$name}...");
+
+        $result = is_callable($method) ? $method() : $this->{$method}();
+
+        if (!$result) {
+            $this->error("    Failed to install {$name}.");
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Phase 3: 发布文件和资源
+     */
+    protected function publishFiles(): bool
+    {
+        $this->info('  → Publishing application files...');
+
+        $force = $this->option('force');
+
+        $publishMethods = [
+            'Migrations' => 'publishMigrations',
+            'Filament Resources' => 'publishFilamentResources',
+            'Filament Pages' => 'publishFilamentPages',
+            'Plugins' => 'publishPlugins',
+            'Models' => 'publishModels',
+            'Providers' => 'publishProviders',
+            'Jobs' => 'publishJobs',
+            'Services' => 'publishServices',
+            'Traits' => 'publishTraits',
+            'Tenant Controllers' => 'publishTenantControllers',
+            'Requests' => "publishRequests",
+            'Routes' => 'publishRoutes',
+            'Pricing View' => 'publishPricingView',
+            'Middleware' => 'publishMiddleware',
+            'Helpers' => 'publishHelpers',
+            'Observers' => 'publishObservers',
+        ];
+
+        foreach ($publishMethods as $name => $method) {
+            $this->comment("    • Publishing {$name}...");
+            $this->{$method}($force);
+        }
+
+        return true;
+    }
+
+    /**
+     * Phase 4: 配置应用
+     */
+    protected function configureApplication(): bool
+    {
+        $this->info('  → Updating application configurations...');
+
+        $configurations = [
+            'Service Providers' => 'updateServiceProviders',
+            'AdminPanel Provider' => 'updateAdminPanelProvider',
+            'Filament General Settings' => 'configureFilamentGeneralSettings',
+            'Auth Config' => 'updateAuthConfig',
+            'Tenancy Config' => 'updateTenancyConfig',
+            'Tenancy Service Provider' => 'updateTenancyServiceProvider',
+            'Middleware Registration' => 'updateMiddlewareConfig',
+            'App Service Provider' => 'updateAppServiceProvider',
+        ];
+
+        foreach ($configurations as $name => $method) {
+            $this->comment("    • Configuring {$name}...");
+            $this->{$method}();
+        }
+
+        return true;
+    }
+
+    /**
+     * Phase 5: 完成安装
+     */
+    protected function finalizeInstallation(): bool
+    {
+        $this->info('  → Clearing and caching configuration...');
         $this->runArtisanCommand(['config:clear']);
         $this->runArtisanCommand(['config:cache']);
 
+        return true;
+    }
+
+    /**
+     * 显示成功信息
+     */
+    protected function displaySuccess(): void
+    {
         $this->newLine();
-        $this->info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        $this->info('✓ eBrook SaaS Starter has been installed successfully!');
-        $this->info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        $this->info('╔══════════════════════════════════════════════════════════╗');
+        $this->info('║     ✓ Installation Completed Successfully!              ║');
+        $this->info('╚══════════════════════════════════════════════════════════╝');
         $this->newLine();
+
         $this->comment('All files have been published to your project.');
         $this->newLine();
-        $this->info('Next steps:');
+
+        $this->info('Next Steps:');
         $this->line('  1. Run: npm install');
         $this->line('  2. Run: php artisan migrate');
         $this->line('  3. Run: php artisan shield:generate --all');
         $this->line('  4. Run: php artisan shield:super-admin');
         $this->newLine();
-        $this->info('You can now remove the "ebrook/b2b-saas-starter" package from');
-        $this->info('your composer.json if desired, as all files have been published.');
+
+        $this->comment('Optional: You can remove "ebrook/b2b-saas-starter" from composer.json');
+        $this->comment('as all files have been published to your project.');
         $this->newLine();
     }
 
@@ -299,6 +404,32 @@ class InstallCommand extends Command
     }
 
     /**
+     * 复制 Filament Pages 文件
+     */
+    protected function publishFilamentPages(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Filament/Pages',
+            base_path('app/Filament/Pages'),
+            $force,
+            'Filament Pages'
+        );
+    }
+
+    /**
+     * 复制 Plugins 文件
+     */
+    protected function publishPlugins(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Plugins',
+            base_path('app/Plugins'),
+            $force,
+            'Plugins'
+        );
+    }
+
+    /**
      * 复制 Services 文件
      */
     protected function publishServices(bool $force = false): void
@@ -312,6 +443,19 @@ class InstallCommand extends Command
     }
 
     /**
+     * 复制 Traits 文件
+     */
+    protected function publishTraits(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Traits',
+            base_path('app/Traits'),
+            $force,
+            'Traits'
+        );
+    }
+
+    /**
      * 复制 Tenant Controllers 文件
      */
     protected function publishTenantControllers(bool $force = false): void
@@ -321,6 +465,19 @@ class InstallCommand extends Command
             base_path('app/Http/Controllers/Tenant'),
             $force,
             'Tenant Controllers'
+        );
+    }
+
+    /**
+     * 复制 Requests 文件
+     */
+    protected function publishRequests(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Http/Requests',
+            base_path('app/Http/Requests'),
+            $force,
+            'Requests'
         );
     }
 
@@ -429,7 +586,7 @@ class InstallCommand extends Command
                 // 使用简单的字符串替换
                 $newLine = "    {$provider},\n";
                 $content = str_replace("];", $newLine . "];", $content);
-                
+
                 $this->info("Added {$provider} to bootstrap/providers.php");
                 $modified = true;
             } else {
@@ -462,7 +619,7 @@ class InstallCommand extends Command
         if (!preg_match("/'tenant'\s*=>/", $content)) {
             // 在 'web' guard 之后添加 'tenant' guard
             $tenantGuard = "\n        'tenant' => [\n            'driver' => 'session',\n            'provider' => 'tenant_users',\n        ],";
-            
+
             // 查找 'web' guard 的结束位置
             $pattern = "/('web'\s*=>\s*\[[^\]]*\],)/s";
             if (preg_match($pattern, $content)) {
@@ -478,7 +635,7 @@ class InstallCommand extends Command
         if (!preg_match("/'tenant_users'\s*=>/", $content)) {
             // 在 'users' provider 之后添加 'tenant_users' provider
             $tenantProvider = "\n\n        'tenant_users' => [\n            'driver' => 'eloquent',\n            'model' => App\\Models\\Tenant\\User::class,\n        ],";
-            
+
             // 查找 'users' provider 的结束位置（在 providers 数组中）
             $pattern = "/('providers'\s*=>\s*\[[^\[]*'users'\s*=>\s*\[[^\]]*\],)/s";
             if (preg_match($pattern, $content)) {
@@ -538,29 +695,114 @@ class InstallCommand extends Command
         }
 
         $content = File::get($providerPath);
+        $modified = false;
 
         // 检查是否已经存在 SeedTenantShield
-        if (strpos($content, 'SeedTenantShield::class') !== false) {
-            $this->info('SeedTenantShield::class already exists in TenancyServiceProvider.php');
-            return;
+        if (strpos($content, 'SeedTenantShield::class') === false) {
+            // 在 Jobs\MigrateDatabase::class 之后添加 \App\Jobs\SeedTenantShield::class
+            $pattern = '/(Jobs\\\\MigrateDatabase::class,)/';
+            if (preg_match($pattern, $content)) {
+                $replacement = "$1\n                    \\App\\Jobs\\SeedTenantShield::class,";
+                $content = preg_replace($pattern, $replacement, $content);
+                $this->info('Added \\App\\Jobs\\SeedTenantShield::class to TenancyServiceProvider.php JobPipeline');
+                $modified = true;
+            } else {
+                $this->warn('Could not find Jobs\\MigrateDatabase::class in TenancyServiceProvider.php');
+            }
         }
 
-        // 在 Jobs\MigrateDatabase::class 之后添加 \App\Jobs\SeedTenantShield::class
-        $pattern = '/(Jobs\\\\MigrateDatabase::class,)/';
-        if (preg_match($pattern, $content)) {
-            $replacement = "$1\n                    \\App\\Jobs\\SeedTenantShield::class,";
-            $content = preg_replace($pattern, $replacement, $content);
-            
+        // 取消注释 Livewire::setUpdateRoute (第 204-206 行)
+        // 检查代码是否已经被注释
+        if (strpos($content, '// Livewire::setUpdateRoute(function ($handle)') !== false) {
+            // 首先检查并添加 use Livewire\Livewire; 语句
+            if (strpos($content, 'use Livewire\Livewire;') === false) {
+                // 查找最后一个 use 语句，在其后添加
+                // 匹配所有 use 语句行
+                if (preg_match_all('/^(use [^;]+;)$/m', $content, $matches, PREG_OFFSET_CAPTURE)) {
+                    // 获取最后一个 use 语句
+                    $lastMatch = end($matches[0]);
+                    $lastUseLine = $lastMatch[0];
+                    $lastUsePos = $lastMatch[1];
+
+                    // 找到该行的结束位置（换行符）
+                    $lineEndPos = strpos($content, "\n", $lastUsePos);
+                    if ($lineEndPos !== false) {
+                        // 在最后一个 use 语句后添加新的 use 语句
+                        $newUse = "use Livewire\Livewire;\n";
+                        $content = substr_replace($content, $lastUseLine . "\n" . $newUse, $lastUsePos, $lineEndPos - $lastUsePos + 1);
+                        $this->info('Added use Livewire\Livewire; to TenancyServiceProvider.php');
+                        $modified = true;
+                    }
+                } else {
+                    // 如果找不到 use 语句，在 namespace 后添加
+                    $content = preg_replace(
+                        '/(namespace App\\\\Providers;[\r\n]+)/',
+                        '$1use Livewire\Livewire;' . "\n",
+                        $content
+                    );
+                    $this->info('Added use Livewire\Livewire; to TenancyServiceProvider.php');
+                    $modified = true;
+                }
+            }
+
+            // 使用多行模式匹配注释的代码块
+            $pattern = '/(\/\/\s*To make Livewire v3 work with Tenancy, make the update route universal\.\s*[\r\n]+\s*\/\/\s*Livewire::setUpdateRoute\(function \(\$handle\) \{[\r\n]+\s*\/\/\s*return RouteFacade::post\(\'\/livewire\/update\', \$handle\)->middleware\(\[\'web\', \'universal\', \\\\Stancl\\\\Tenancy\\\\Tenancy::defaultMiddleware\(\)\]\);[\r\n]+\s*\/\/\s*\}\);)/m';
+            if (preg_match($pattern, $content)) {
+                $uncommentedCode = "// To make Livewire v3 work with Tenancy, make the update route universal.
+        Livewire::setUpdateRoute(function (\$handle) {
+            return RouteFacade::post('/livewire/update', \$handle)->middleware(['web', 'universal', \\Stancl\\Tenancy\\Tenancy::defaultMiddleware()]);
+        });";
+                $content = preg_replace($pattern, $uncommentedCode, $content);
+                $this->info('Uncommented Livewire::setUpdateRoute in TenancyServiceProvider.php');
+                $modified = true;
+            } else {
+                // 如果上面的模式不匹配，尝试只匹配三行注释（不包括前面的说明注释）
+                $simplePattern = '/(\/\/\s*Livewire::setUpdateRoute\(function \(\$handle\) \{[\r\n]+\s*\/\/\s*return RouteFacade::post\(\'\/livewire\/update\', \$handle\)->middleware\(\[\'web\', \'universal\', \\\\Stancl\\\\Tenancy\\\\Tenancy::defaultMiddleware\(\)\]\);[\r\n]+\s*\/\/\s*\}\);)/m';
+                if (preg_match($simplePattern, $content)) {
+                    $uncommentedCode = "Livewire::setUpdateRoute(function (\$handle) {
+            return RouteFacade::post('/livewire/update', \$handle)->middleware(['web', 'universal', \\Stancl\\Tenancy\\Tenancy::defaultMiddleware()]);
+        });";
+                    $content = preg_replace($simplePattern, $uncommentedCode, $content);
+                    $this->info('Uncommented Livewire::setUpdateRoute in TenancyServiceProvider.php');
+                    $modified = true;
+                }
+            }
+        } elseif (strpos($content, 'Livewire::setUpdateRoute(function ($handle)') !== false && strpos($content, '// Livewire::setUpdateRoute') === false) {
+            // 如果代码已经取消注释，检查是否需要添加 use 语句
+            if (strpos($content, 'use Livewire\Livewire;') === false) {
+                // 查找最后一个 use 语句，在其后添加
+                if (preg_match_all('/^(use [^;]+;)$/m', $content, $matches, PREG_OFFSET_CAPTURE)) {
+                    // 获取最后一个 use 语句
+                    $lastMatch = end($matches[0]);
+                    $lastUseLine = $lastMatch[0];
+                    $lastUsePos = $lastMatch[1];
+
+                    // 找到该行的结束位置（换行符）
+                    $lineEndPos = strpos($content, "\n", $lastUsePos);
+                    if ($lineEndPos !== false) {
+                        // 在最后一个 use 语句后添加新的 use 语句
+                        $newUse = "use Livewire\Livewire;\n";
+                        $content = substr_replace($content, $lastUseLine . "\n" . $newUse, $lastUsePos, $lineEndPos - $lastUsePos + 1);
+                        $this->info('Added use Livewire\Livewire; to TenancyServiceProvider.php');
+                        $modified = true;
+                    }
+                }
+            } else {
+                $this->info('Livewire::setUpdateRoute is already uncommented in TenancyServiceProvider.php');
+            }
+        }
+
+        if ($modified) {
             File::put($providerPath, $content);
-            $this->info('Added \\App\\Jobs\\SeedTenantShield::class to TenancyServiceProvider.php JobPipeline');
+            $this->info('TenancyServiceProvider.php has been updated successfully!');
         } else {
-            $this->warn('Could not find Jobs\\MigrateDatabase::class in TenancyServiceProvider.php');
+            $this->info('TenancyServiceProvider.php is already up to date.');
         }
     }
 
     /**
      * 安装必需的 Composer 依赖包
-     * 
+     *
      * 确保这些依赖在项目的 composer.json 中（而不仅仅是通过 dev 依赖间接引入）
      * 这样用户在移除 ebrook/b2b-saas-starter 包后，项目仍然可以正常运行
      */
@@ -583,10 +825,10 @@ class InstallCommand extends Command
 
         // 检查哪些包需要在项目 composer.json 中显式声明
         $packagesToInstall = [];
-        
+
         foreach ($packages as $package) {
             [$name, $version] = explode(':', $package);
-            
+
             if (!$this->isPackageInstalled($name)) {
                 $packagesToInstall[] = $package;
                 $this->comment("  • {$name} will be added to composer.json");
@@ -613,7 +855,7 @@ class InstallCommand extends Command
 
         // 如果使用了 --force 选项，直接安装，不询问
         $force = $this->option('force');
-        
+
         if (!$force && !$this->confirm('Do you want to add these packages now?', true)) {
             $this->warn('Skipping package installation. You may need to add them manually later.');
             return true;
@@ -632,13 +874,13 @@ class InstallCommand extends Command
     protected function isPackageInstalled(string $package): bool
     {
         $composerJsonPath = base_path('composer.json');
-        
+
         if (!File::exists($composerJsonPath)) {
             return false;
         }
 
         $composerJson = json_decode(File::get($composerJsonPath), true);
-        
+
         return isset($composerJson['require'][$package]) || isset($composerJson['require-dev'][$package]);
     }
 
@@ -719,9 +961,16 @@ class InstallCommand extends Command
         $content = File::get($adminPanelProviderPath);
         $modified = false;
 
-        // 1. 添加 FilamentGeneralSettingsPlugin 的 use 语句
-        $useStatement = 'use Joaopaulolndev\FilamentGeneralSettings\FilamentGeneralSettingsPlugin;';
+        // 1. 添加 CustomFilamentGeneralSettingsPlugin 的 use 语句
+        $useStatement = 'use App\Plugins\CustomFilamentGeneralSettingsPlugin;';
         if (strpos($content, $useStatement) === false) {
+            // 移除旧的 FilamentGeneralSettingsPlugin use 语句（如果存在）
+            $content = preg_replace(
+                '/use Joaopaulolndev\\\\FilamentGeneralSettings\\\\FilamentGeneralSettingsPlugin;[\r\n]*/',
+                '',
+                $content
+            );
+
             // 在 use Illuminate\View\Middleware\ShareErrorsFromSession; 后面添加
             $content = preg_replace(
                 '/(use Illuminate\\\\View\\\\Middleware\\\\ShareErrorsFromSession;)/',
@@ -729,7 +978,7 @@ class InstallCommand extends Command
                 $content
             );
 
-            $this->info("Added FilamentGeneralSettingsPlugin use statement to AdminPanelProvider.php");
+            $this->info("Added CustomFilamentGeneralSettingsPlugin use statement to AdminPanelProvider.php");
             $modified = true;
         }
 
@@ -745,10 +994,17 @@ class InstallCommand extends Command
             $modified = true;
         }
 
-        // 3. 添加 FilamentGeneralSettingsPlugin 到 plugins 配置中
-        if (!preg_match('/->plugins\(\s*\[.*FilamentGeneralSettingsPlugin::make\(\).*?\]\s*\)/s', $content)) {
+        // 3. 添加或更新 CustomFilamentGeneralSettingsPlugin 到 plugins 配置中
+        // 先移除旧的 FilamentGeneralSettingsPlugin（如果存在）
+        $content = preg_replace(
+            '/\s*FilamentGeneralSettingsPlugin::make\(\)[^,]*,[\r\n]*/',
+            '',
+            $content
+        );
+
+        if (!preg_match('/->plugins\(\s*\[.*CustomFilamentGeneralSettingsPlugin::make\(\).*?\]\s*\)/s', $content)) {
             // 在 FilamentShieldPlugin 之后添加
-            $pluginConfig = "                FilamentGeneralSettingsPlugin::make()
+            $pluginConfig = "                CustomFilamentGeneralSettingsPlugin::make()
                     ->setSort(3)
                     ->setIcon('heroicon-o-cog')
                     ->setNavigationGroup('System')
@@ -761,7 +1017,7 @@ class InstallCommand extends Command
             if (preg_match($pattern, $content, $matches)) {
                 $replacement = $matches[1] . ',' . "\n" . $pluginConfig . "\n" . $matches[2];
                 $content = preg_replace($pattern, $replacement, $content);
-                $this->info("Added FilamentGeneralSettingsPlugin to AdminPanelProvider.php");
+                $this->info("Added CustomFilamentGeneralSettingsPlugin to AdminPanelProvider.php");
                 $modified = true;
             } else {
                 $this->warn("Could not find FilamentShieldPlugin::make() in AdminPanelProvider.php plugins array");
@@ -775,6 +1031,7 @@ class InstallCommand extends Command
             $this->info('AdminPanelProvider.php is already up to date.');
         }
     }
+
     /**
      * 安装 Filament Payments 及其依赖（包括 Spatie Media Library）
      */
@@ -927,6 +1184,11 @@ return [
     // 启用自定义标签页
     'show_custom_tabs' => true,
 
+    // 自定义加密字段
+    'encrypted_fields' => [
+        # 'lago_api_key',
+    ],
+
     // 自定义配置标签页 - API和支付设置
     'custom_tabs' => [
         'api_payment_settings' => [
@@ -940,6 +1202,7 @@ return [
                     'placeholder' => 'https://api.lago.dev',
                     'required' => false,
                     'rules' => [],
+                    'visible_in_panels' => ['admin'], // 只在中央控制台显示
                 ],
                 'lago_api_key' => [
                     'type' => 'password',
@@ -947,6 +1210,8 @@ return [
                     'placeholder' => 'Enter your Lago API key',
                     'required' => false,
                     'rules' => [],
+                    'encrypt' => true,
+                    'visible_in_panels' => ['admin'],
                 ],
                 'lago_timeout' => [
                     'type' => 'text',
@@ -954,6 +1219,7 @@ return [
                     'placeholder' => '30',
                     'required' => false,
                     'rules' => [],
+                    'visible_in_panels' => ['admin'],
                 ],
                 'stripe_secret_key' => [
                     'type' => 'password',
@@ -961,6 +1227,8 @@ return [
                     'placeholder' => 'Place your Stripe Secret Key here',
                     'required' => false,
                     'rules' => [],
+                    'encrypt' => true,
+                    'visible_in_panels' => ['admin', 'app'],
                 ],
                 'stripe_publishable_key' => [
                     'type' => 'text',
@@ -968,6 +1236,8 @@ return [
                     'placeholder' => 'Place your Stripe Publishable Key here',
                     'required' => false,
                     'rules' => [],
+                    'encrypt' => true,
+                    'visible_in_panels' => ['admin', 'app'], // 在中央控制台和租户控制台都显示
                 ],
             ],
         ],
@@ -1022,6 +1292,11 @@ return [
             // 添加自定义配置
             $customConfig = "
 
+    // 自定义加密字段
+    'encrypted_fields' => [
+        # 'lago_api_key',
+    ],
+
     // 自定义配置标签页 - API和支付设置
     'custom_tabs' => [
         'api_payment_settings' => [
@@ -1035,6 +1310,7 @@ return [
                     'placeholder' => 'https://api.lago.dev',
                     'required' => false,
                     'rules' => [],
+                    'visible_in_panels' => ['admin'], // 只在中央控制台显示
                 ],
                 'lago_api_key' => [
                     'type' => 'password',
@@ -1042,6 +1318,8 @@ return [
                     'placeholder' => 'Enter your Lago API key',
                     'required' => false,
                     'rules' => [],
+                    'encrypt' => true,
+                    'visible_in_panels' => ['admin'],
                 ],
                 'lago_timeout' => [
                     'type' => 'text',
@@ -1049,6 +1327,7 @@ return [
                     'placeholder' => '30',
                     'required' => false,
                     'rules' => [],
+                    'visible_in_panels' => ['admin'],
                 ],
                 'stripe_secret_key' => [
                     'type' => 'password',
@@ -1056,6 +1335,8 @@ return [
                     'placeholder' => 'sk_test_...',
                     'required' => false,
                     'rules' => [],
+                    'encrypt' => true,
+                    'visible_in_panels' => ['admin', 'app'],
                 ],
                 'stripe_publishable_key' => [
                     'type' => 'text',
@@ -1063,6 +1344,8 @@ return [
                     'placeholder' => 'pk_test_...',
                     'required' => false,
                     'rules' => [],
+                    'encrypt' => true,
+                    'visible_in_panels' => ['admin', 'app'], // 在中央控制台和租户控制台都显示
                 ],
             ],
         ],
@@ -1106,14 +1389,14 @@ return [
         $this->newLine();
 
         $composerJsonPath = base_path('composer.json');
-        
+
         if (!File::exists($composerJsonPath)) {
             $this->error('composer.json not found.');
             return false;
         }
 
         $composerJson = json_decode(File::get($composerJsonPath), true);
-        
+
         if (json_last_error() !== JSON_ERROR_NONE) {
             $this->error('Failed to parse composer.json: ' . json_last_error_msg());
             return false;
@@ -1144,16 +1427,181 @@ return [
         } else {
             // 添加自定义仓库到 repositories 数组开头
             array_unshift($composerJson['repositories'], $customRepository);
-            
+
             // 保存修改后的 composer.json
             $jsonContent = json_encode($composerJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
             File::put($composerJsonPath, $jsonContent . "\n");
-            
+
             $this->info('Added custom repository: ' . $customRepository['url']);
         }
 
         $this->newLine();
         return true;
+    }
+
+    /**
+     * 更新 AppServiceProvider 注册 GeneralSettingObserver
+     */
+    protected function updateAppServiceProvider(): void
+    {
+        $appServiceProviderPath = base_path('app/Providers/AppServiceProvider.php');
+
+        if (!File::exists($appServiceProviderPath)) {
+            $this->warn('AppServiceProvider.php not found, skipping AppServiceProvider update...');
+            return;
+        }
+
+        $content = File::get($appServiceProviderPath);
+        $modified = false;
+
+        // 1. 添加 use 语句
+        $useStatements = [
+            'use App\Observers\GeneralSettingObserver;',
+            'use Joaopaulolndev\FilamentGeneralSettings\Models\GeneralSetting;',
+        ];
+
+        foreach ($useStatements as $useStatement) {
+            if (strpos($content, $useStatement) === false) {
+                // 在 namespace 声明后添加
+                $pattern = '/(namespace App\\\\Providers;)/';
+                if (preg_match($pattern, $content)) {
+                    $content = preg_replace($pattern, "$1\n\n{$useStatement}", $content);
+                    $this->info("Added {$useStatement} to AppServiceProvider.php");
+                    $modified = true;
+                }
+            }
+        }
+
+        // 2. 在 boot 方法中注册 Observer
+        $observerRegistration = 'GeneralSetting::observe(GeneralSettingObserver::class);';
+
+        if (strpos($content, $observerRegistration) === false) {
+            // 查找 boot 方法
+            $pattern = '/(public function boot\(\): void\s*\{)/';
+            if (preg_match($pattern, $content)) {
+                $replacement = "$1\n        // Register the GeneralSetting observer for encryption/decryption\n        {$observerRegistration}";
+                $content = preg_replace($pattern, $replacement, $content);
+                $this->info("Registered GeneralSettingObserver in AppServiceProvider.php");
+                $modified = true;
+            } else {
+                 $this->warn("Could not find boot method in AppServiceProvider.php");
+            }
+        }
+
+        if ($modified) {
+            File::put($appServiceProviderPath, $content);
+            $this->info('AppServiceProvider.php has been updated successfully!');
+        } else {
+            $this->info('AppServiceProvider.php is already up to date.');
+        }
+    }
+
+    /**
+     * 复制 Middleware 文件
+     */
+    protected function publishMiddleware(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Http/Middleware',
+            base_path('app/Http/Middleware'),
+            $force,
+            'Middleware'
+        );
+    }
+
+    /**
+     * 复制 Helpers 文件
+     */
+    protected function publishHelpers(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Helpers',
+            base_path('app/Helpers'),
+            $force,
+            'Helpers'
+        );
+    }
+
+    /**
+     * 复制 Observers 文件
+     */
+    protected function publishObservers(bool $force = false): void
+    {
+        $this->publishDirectory(
+            __DIR__ . '/../../Observers',
+            base_path('app/Observers'),
+            $force,
+            'Observers'
+        );
+    }
+
+    /**
+     * 更新 Middleware 配置 (bootstrap/app.php)
+     */
+    protected function updateMiddlewareConfig(): void
+    {
+        $bootstrapAppPath = base_path('bootstrap/app.php');
+
+        if (!File::exists($bootstrapAppPath)) {
+            $this->warn('bootstrap/app.php not found, skipping middleware update...');
+            return;
+        }
+
+        $content = File::get($bootstrapAppPath);
+        $modified = false;
+
+        // 需要添加的 Middleware
+        $middlewareToAdd = [
+            '\App\Http\Middleware\ForceHttps::class',
+            '\App\Http\Middleware\SecurityHeaders::class',
+        ];
+
+        // 检查是否已经存在
+        $missingMiddleware = [];
+        foreach ($middlewareToAdd as $middleware) {
+            if (strpos($content, $middleware) === false) {
+                $missingMiddleware[] = $middleware;
+            }
+        }
+
+        if (empty($missingMiddleware)) {
+            $this->info('Middleware already registered in bootstrap/app.php');
+            return;
+        }
+
+        // 构造要添加的代码块
+        $middlewareCode = "";
+        foreach ($missingMiddleware as $middleware) {
+            $middlewareCode .= "            {$middleware},\n";
+        }
+
+        // 尝试找到 ->withMiddleware(function (Middleware $middleware): void { ... })
+        // 并添加 $middleware->append([...]);
+
+        // 匹配 withMiddleware 闭包的开始
+        $pattern = '/(->withMiddleware\s*\(\s*function\s*\(\s*Middleware\s*\$middleware\s*\)\s*:\s*void\s*\{)/';
+
+        if (preg_match($pattern, $content)) {
+            // 检查是否已经有 append 调用
+            if (strpos($content, '$middleware->append([') !== false) {
+                // 如果已有 append，尝试插入到数组中
+                $appendPattern = '/(\$middleware->append\(\[)/';
+                $content = preg_replace($appendPattern, "$1\n{$middlewareCode}", $content);
+                $modified = true;
+            } else {
+                // 如果没有 append，添加新的 append 调用
+                $replacement = "$1\n        \$middleware->append([\n{$middlewareCode}        ]);";
+                $content = preg_replace($pattern, $replacement, $content);
+                $modified = true;
+            }
+        } else {
+            $this->warn('Could not find withMiddleware callback in bootstrap/app.php');
+        }
+
+        if ($modified) {
+            File::put($bootstrapAppPath, $content);
+            $this->info('Registered middleware in bootstrap/app.php');
+        }
     }
 
     /**
@@ -1264,7 +1712,7 @@ return [
         if ($modified) {
             // 排序 devDependencies（可选，但更整洁）
             ksort($packageJson['devDependencies']);
-            
+
             $jsonContent = json_encode($packageJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             File::put($packageJsonPath, $jsonContent . "\n");
             $this->info('Updated package.json');
@@ -1283,7 +1731,7 @@ return [
         // 如果文件已存在，检查是否已配置 Tailwind
         if (File::exists($viteConfigPath)) {
             $content = File::get($viteConfigPath);
-            
+
             // 检查是否已包含 tailwindcss 插件
             if (strpos($content, '@tailwindcss/vite') !== false && strpos($content, 'tailwindcss()') !== false) {
                 $this->info('vite.config.js already configured with Tailwind CSS');
@@ -1329,7 +1777,7 @@ JS;
         // 如果文件已存在，检查是否已配置 Tailwind
         if (File::exists($appCssPath)) {
             $content = File::get($appCssPath);
-            
+
             // 检查是否已包含 Tailwind 导入
             if (strpos($content, '@import \'tailwindcss\';') !== false || strpos($content, '@import "tailwindcss";') !== false) {
                 $this->info('resources/css/app.css already configured with Tailwind CSS');

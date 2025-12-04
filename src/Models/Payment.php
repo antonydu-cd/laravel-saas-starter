@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Builder;
 use Stancl\Tenancy\Database\Concerns\CentralConnection;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Activitylog\LogOptions;
@@ -14,6 +15,34 @@ class Payment extends Model
     use LogsActivity;
 
     protected $table = 'subscription_payments';
+
+    /**
+     * Boot the model and add global scopes for tenant isolation
+     */
+    protected static function booted(): void
+    {
+        // 自动过滤当前租户的数据(仅在租户上下文中)
+        static::addGlobalScope('tenant', function (Builder $builder) {
+            if (tenancy()->initialized && tenant()) {
+                $builder->where('tenant_id', tenant('id'));
+            }
+        });
+
+        // 创建时自动设置tenant_id
+        static::creating(function ($payment) {
+            if (tenancy()->initialized && tenant() && !$payment->tenant_id) {
+                $payment->tenant_id = tenant('id');
+            }
+        });
+    }
+
+    /**
+     * Scope to bypass tenant isolation (for admin access)
+     */
+    public function scopeAllTenants(Builder $query): Builder
+    {
+        return $query->withoutGlobalScope('tenant');
+    }
 
     protected $fillable = [
         'tenant_id',

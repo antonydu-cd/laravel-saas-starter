@@ -24,7 +24,7 @@ use Stancl\Tenancy\Middleware\PreventAccessFromUnwantedDomains;
 use Stancl\Tenancy\Middleware\ScopeSessions;
 use App\Filament\Resources\ActivityLogs\ActivityLogResource;
 use App\Filament\App\Pages\Pricing;
-use Joaopaulolndev\FilamentGeneralSettings\FilamentGeneralSettingsPlugin;
+use App\Plugins\CustomFilamentGeneralSettingsPlugin;
 
 class AppPanelProvider extends PanelProvider
 {
@@ -69,7 +69,7 @@ class AppPanelProvider extends PanelProvider
             ->plugins([
                 FilamentShieldPlugin::make()
                 ->navigationGroup(fn() => __('System')),
-                FilamentGeneralSettingsPlugin::make()
+                CustomFilamentGeneralSettingsPlugin::make()
                 ->setNavigationGroup(fn() => __('System'))
                 ->setIcon('heroicon-o-key')
                 ->setSort(100)

@@ -4,11 +4,13 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
+use App\Traits\HasGeneralSettings;
 
 class LagoService
 {
+    use HasGeneralSettings;
+
     private string $baseUrl;
     private string $apiKey;
     private int $timeout;
@@ -16,26 +18,16 @@ class LagoService
     public function __construct()
     {
         // 只从数据库设置读取配置，完全不依赖env或config
-        $this->baseUrl = rtrim((string) $this->getSetting('lago_base_url'), '/');
-        $this->apiKey = (string) $this->getSetting('lago_api_key');
-        $this->timeout = (int) $this->getSetting('lago_timeout', 30);
+        // 如果在租户上下文中，从中央控制台获取配置
+        $useCentralDatabase = tenancy()->initialized;
+        
+        $this->baseUrl = rtrim((string) $this->getSetting('lago_base_url', null, false, $useCentralDatabase), '/');
+        $this->apiKey = (string) $this->getSetting('lago_api_key', null, true, $useCentralDatabase);
+        $this->timeout = (int) $this->getSetting('lago_timeout', 30, false, $useCentralDatabase);
 
         if ($this->baseUrl === '' || $this->apiKey === '') {
             throw new \RuntimeException('Lago configuration is incomplete. Please configure LAGO settings in General Settings.');
         }
-    }
-
-    /**
-     * 从数据库设置中获取配置值
-     */
-    private function getSetting(string $key, $default = null)
-    {
-        $settings = DB::table('general_settings')->first();
-        if ($settings && $settings->more_configs) {
-            $moreConfigs = json_decode($settings->more_configs, true);
-            return $moreConfigs[$key] ?? $default;
-        }
-        return $default;
     }
 
     private function toRfc3339(null|\DateTimeInterface|string $value): ?string
