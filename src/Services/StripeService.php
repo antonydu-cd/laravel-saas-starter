@@ -18,9 +18,9 @@ class StripeService
 
     public function __construct()
     {
-        // 只从数据库设置读取配置，完全不依赖env或config
-        $this->apiKey = (string) $this->getSetting('stripe_secret_key', null, true);
-        $this->webhookSecret = (string) $this->getSetting('stripe_webhook_secret', null, true);
+        // 从中央数据库读取Stripe配置，确保所有租户使用统一的Stripe设置
+        $this->apiKey = (string) $this->getSetting('stripe_secret_key', null, true, true);
+        $this->webhookSecret = (string) $this->getSetting('stripe_webhook_secret', null, true, true);
 
         if (empty($this->apiKey)) {
             throw new \RuntimeException('Stripe API key is not configured. Please configure STRIPE settings in General Settings.');
